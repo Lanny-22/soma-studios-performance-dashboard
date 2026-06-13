@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.data import item_breakdown
-from dashboard.shared import BAR_CHART_HEIGHT, EUR, GREEN, PLOTLY_CONFIG, filter_date_range, operating_view_banner
+from dashboard.shared import BAR_CHART_HEIGHT, EUR, GREEN, PLOTLY_CONFIG, filter_date_range
 
 PRODUCT_CATEGORY = "Product"
 
@@ -56,7 +56,6 @@ def _horizontal_bars(
 
 def render(raw: pd.DataFrame, start: date, end: date) -> None:
     st.title("Product Sales")
-    operating_view_banner()
     st.caption("Retail and merch — which products sell most in the selected period")
 
     filtered = filter_date_range(raw, start, end)

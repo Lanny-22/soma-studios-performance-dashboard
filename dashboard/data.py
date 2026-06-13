@@ -7,8 +7,6 @@ import pandas as pd
 
 from src.db import get_conn
 
-OPERATING_START = date(2026, 5, 13)
-INTRO_PACK_ITEM = "3 Class Beginner Intro Pack - PRE-SALE OFFER"
 STUDIO_TIMEZONE = "Europe/Malta"
 DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
@@ -35,10 +33,15 @@ def load_total_sales() -> pd.DataFrame:
     df["payment_at"] = pd.to_datetime(df["payment_at"], utc=True)
     df["service_at"] = pd.to_datetime(df["service_at"], utc=True, errors="coerce")
     df["sale_date"] = df["payment_at"].dt.date
-    service_local = df["service_at"].dt.tz_convert(STUDIO_TIMEZONE)
-    df["service_date"] = service_local.dt.date
-    df["service_hour"] = service_local.dt.hour
-    df["service_day"] = service_local.dt.day_name()
+    df["service_date"] = pd.Series([pd.NaT] * len(df), dtype="object")
+    df["service_hour"] = pd.array([pd.NA] * len(df), dtype="Int64")
+    df["service_day"] = pd.Series([None] * len(df), dtype="object")
+    valid_service = df["service_at"].notna()
+    if valid_service.any():
+        service_local = df.loc[valid_service, "service_at"].dt.tz_convert(STUDIO_TIMEZONE)
+        df.loc[valid_service, "service_date"] = service_local.dt.date
+        df.loc[valid_service, "service_hour"] = service_local.dt.hour.astype("Int64")
+        df.loc[valid_service, "service_day"] = service_local.dt.day_name()
     df["sale_value"] = pd.to_numeric(df["sale_value"], errors="coerce").fillna(0)
     df["refunded"] = pd.to_numeric(df["refunded"], errors="coerce").fillna(0)
     df["net_sales"] = df["sale_value"] - df["refunded"]
@@ -46,12 +49,12 @@ def load_total_sales() -> pd.DataFrame:
     return df
 
 
-def exclude_intro_pack(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df
-    mask = df["item"].fillna("").ne(INTRO_PACK_ITEM)
-    mask &= ~df["item"].fillna("").str.contains("PRE-SALE", case=False)
-    return df.loc[mask].copy()
+def _with_revenue_per_class(grouped: pd.DataFrame) -> pd.DataFrame:
+    grouped = grouped.copy()
+    grouped["revenue_per_class"] = (
+        grouped["net_sales"] / grouped["class_sessions"].replace(0, pd.NA)
+    ).fillna(0)
+    return grouped
 
 
 def filter_service_date_range(df: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
@@ -63,36 +66,45 @@ def filter_service_date_range(df: pd.DataFrame, start: date, end: date) -> pd.Da
 
 
 def schedule_timing_matrix(df: pd.DataFrame) -> pd.DataFrame:
-    """Net sales aggregated by day-of-week and hour (studio local time)."""
+    """Net sales by day-of-week and hour; class_sessions = distinct service times."""
     if df.empty:
         return pd.DataFrame()
 
-    matrix = (
-        df.groupby(["service_day", "service_hour"], as_index=False)
-        .agg(net_sales=("net_sales", "sum"), transactions=("sale_reference", "count"))
+    matrix = df.groupby(["service_day", "service_hour"], as_index=False).agg(
+        net_sales=("net_sales", "sum"),
+        transactions=("sale_reference", "count"),
+        class_sessions=("service_at", "nunique"),
     )
-    return matrix
+    matrix["service_hour"] = matrix["service_hour"].astype(int)
+    return _with_revenue_per_class(matrix)
 
 
 def day_of_week_totals(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
-    totals = (
-        df.groupby("service_day", as_index=False)
-        .agg(net_sales=("net_sales", "sum"), transactions=("sale_reference", "count"))
+    totals = df.groupby("service_day", as_index=False).agg(
+        net_sales=("net_sales", "sum"),
+        transactions=("sale_reference", "count"),
+        class_sessions=("service_at", "nunique"),
     )
     totals["service_day"] = pd.Categorical(totals["service_day"], categories=DAY_ORDER, ordered=True)
-    return totals.sort_values("service_day")
+    return _with_revenue_per_class(totals.sort_values("service_day"))
 
 
 def hour_totals(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
-    return (
+    totals = (
         df.groupby("service_hour", as_index=False)
-        .agg(net_sales=("net_sales", "sum"), transactions=("sale_reference", "count"))
+        .agg(
+            net_sales=("net_sales", "sum"),
+            transactions=("sale_reference", "count"),
+            class_sessions=("service_at", "nunique"),
+        )
         .sort_values("service_hour")
     )
+    totals["service_hour"] = totals["service_hour"].astype(int)
+    return _with_revenue_per_class(totals)
 
 
 def filter_sales(

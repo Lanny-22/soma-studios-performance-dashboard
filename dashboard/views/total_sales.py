@@ -16,7 +16,6 @@ from dashboard.shared import (
     GREEN,
     GREEN_LIGHT,
     PLOTLY_CONFIG,
-    operating_view_banner,
 )
 
 
@@ -237,7 +236,6 @@ def _cumulative_chart(daily: pd.DataFrame, avg_daily: float, show_forecast: bool
 
 def render(raw: pd.DataFrame, start: date, end: date) -> None:
     st.title("Total Sales")
-    operating_view_banner()
     st.caption("Momence Total Sales · filtered view")
 
     all_categories = sorted(raw["category"].unique())
