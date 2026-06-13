@@ -1,7 +1,9 @@
 """Password-protected SOMA Studios sales analytics (Streamlit)."""
 
 import hmac
+import os
 from datetime import date
+from pathlib import Path
 
 import plotly.graph_objects as go
 import pandas as pd
@@ -9,6 +11,8 @@ import streamlit as st
 
 from dashboard.data import daily_totals, filter_sales, load_total_sales
 from src.config import get_settings
+
+ROOT = Path(__file__).resolve().parents[1]
 
 st.set_page_config(
     page_title="SOMA Studios — Sales",
@@ -18,8 +22,35 @@ st.set_page_config(
 )
 
 EUR = "€{:,.2f}"
+BLACK = "#1b1b1b"
 CHART_HEIGHT = 620
 PLOTLY_CONFIG = {"displayModeBar": False, "responsive": True}
+LOGO_CANDIDATES = [
+    ROOT / "assets" / "soma_logo.png",
+    ROOT / "assets" / "soma_logo.jpg",
+    ROOT / "assets" / "logo.png",
+]
+
+
+def _logo_source() -> str | None:
+    for path in LOGO_CANDIDATES:
+        if path.is_file():
+            return str(path)
+    url = os.environ.get("LOGO_URL", "").strip()
+    if url:
+        return url
+    try:
+        if hasattr(st, "secrets") and "LOGO_URL" in st.secrets:
+            return str(st.secrets["LOGO_URL"]).strip()
+    except Exception:
+        pass
+    return None
+
+
+def _show_logo(width: int = 180) -> None:
+    source = _logo_source()
+    if source:
+        st.image(source, width=width)
 
 
 def _password_gate() -> bool:
@@ -32,6 +63,7 @@ def _password_gate() -> bool:
     if st.session_state.get("authenticated"):
         return True
 
+    _show_logo(200)
     st.markdown("## SOMA Studios Analytics")
     st.caption("Enter the password to view sales data.")
     entered = st.text_input("Password", type="password", key="password_input")
@@ -125,7 +157,7 @@ def _cumulative_chart(daily: pd.DataFrame) -> None:
             y=[final_val],
             mode="markers",
             name="Final total",
-            marker=dict(size=14, color="#2d6a4f", line=dict(width=2, color="#ffffff")),
+            marker=dict(size=14, color=BLACK, line=dict(width=2, color="#ffffff")),
             showlegend=False,
             hovertemplate=f"{final_date}<br>Cumulative: {label}<extra></extra>",
         )
@@ -138,14 +170,14 @@ def _cumulative_chart(daily: pd.DataFrame) -> None:
         arrowhead=2,
         arrowsize=1.2,
         arrowwidth=1.5,
-        arrowcolor="#40916c",
+        arrowcolor=BLACK,
         ax=50,
         ay=-48,
         bgcolor="rgba(255, 255, 255, 0.95)",
-        bordercolor="#40916c",
+        bordercolor=BLACK,
         borderwidth=1,
         borderpad=6,
-        font=dict(size=14, color="#1b1b1b"),
+        font=dict(size=14, color=BLACK),
     )
 
     fig.update_layout(
@@ -176,6 +208,9 @@ def main() -> None:
     if st.sidebar.button("Sign out"):
         st.session_state.authenticated = False
         st.rerun()
+
+    _show_logo(150)
+    st.sidebar.divider()
 
     try:
         raw = _cached_sales()
