@@ -157,6 +157,9 @@ def aggregate_instructors(df: pd.DataFrame) -> pd.DataFrame:
     weighted["margin_pct"] = (
         weighted["studio_net"] / weighted["gross_revenue"].replace(0, pd.NA) * 100
     ).fillna(0)
+    weighted["net_revenue_per_class"] = (
+        weighted["studio_net"] / weighted["class_count"].replace(0, pd.NA)
+    ).fillna(0)
     return weighted.drop(columns=["att_weight"]).sort_values(
         "total_bookings", ascending=False
     )

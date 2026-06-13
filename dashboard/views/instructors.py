@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.data import aggregate_instructors, filter_instructor_performance
-from dashboard.shared import BAR_CHART_HEIGHT, BLACK, EUR, GREEN, PLOTLY_CONFIG
+from dashboard.shared import BAR_CHART_HEIGHT, BLACK, EUR, GREEN, GREEN_LIGHT, PLOTLY_CONFIG
 
 
 def _horizontal_bars(
@@ -55,7 +55,7 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
     st.caption(
         "Rankings from Momence instructor reports. "
         "Popularity uses total bookings; profitability is gross revenue minus instructor payout "
-        "(studio net) for the selected months overlapping your date range."
+        "(studio net); net revenue per class is studio net divided by classes taught."
     )
 
     filtered = filter_instructor_performance(raw, start, end)
@@ -69,20 +69,32 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
     gross = ranked["gross_revenue"].sum()
     payouts = ranked["instructor_payout"].sum()
     studio_net = ranked["studio_net"].sum()
+    total_classes = int(ranked["class_count"].sum())
+    net_revenue_per_class = (studio_net / total_classes) if total_classes > 0 else 0
     margin = (studio_net / gross * 100) if gross > 0 else 0
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Total bookings", f"{total_bookings:,}")
-    c2.metric("Classes taught", f"{int(ranked['class_count'].sum()):,}")
+    c2.metric("Classes taught", f"{total_classes:,}")
     c3.metric("Gross revenue", EUR.format(gross))
-    c4.metric("Instructor payouts", EUR.format(payouts))
-    c5.metric("Studio net", EUR.format(studio_net), f"{margin:.0f}% margin")
+    c4.metric("Net revenue per class", EUR.format(net_revenue_per_class))
+    c5.metric("Instructor payouts", EUR.format(payouts))
+    c6.metric("Studio net", EUR.format(studio_net), f"{margin:.0f}% margin")
 
     by_popularity = ranked.sort_values("total_bookings", ascending=False)
     by_profit = ranked.sort_values("studio_net", ascending=False)
+    by_net_revenue_per_class = ranked[ranked["class_count"] > 0].sort_values(
+        "net_revenue_per_class", ascending=False
+    )
 
     st.subheader("Rankings")
-    tab_pop, tab_profit = st.tabs(["By popularity (bookings)", "By profitability (studio net)"])
+    tab_pop, tab_profit, tab_rpc = st.tabs(
+        [
+            "By popularity (bookings)",
+            "By profitability (studio net)",
+            "By net revenue per class",
+        ]
+    )
 
     with tab_pop:
         st.markdown("**Top instructors by total bookings** in the selected period.")
@@ -106,12 +118,25 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
             BLACK,
         )
 
+    with tab_rpc:
+        st.markdown(
+            "**Top instructors by net revenue per class** (studio net ÷ classes taught)."
+        )
+        _horizontal_bars(
+            by_net_revenue_per_class.head(12),
+            "Net revenue per class by instructor",
+            "net_revenue_per_class",
+            "Net revenue per class (€)",
+            GREEN_LIGHT,
+        )
+
     st.subheader("Full instructor table")
     display = ranked.sort_values("total_bookings", ascending=False).copy()
     display["gross_revenue"] = display["gross_revenue"].map(lambda v: EUR.format(v))
     display["instructor_payout"] = display["instructor_payout"].map(lambda v: EUR.format(v))
     display["studio_net"] = display["studio_net"].map(lambda v: EUR.format(v))
     display["margin_pct"] = display["margin_pct"].map(lambda v: f"{v:.1f}%")
+    display["net_revenue_per_class"] = display["net_revenue_per_class"].map(lambda v: EUR.format(v))
     display["average_attendance"] = display["average_attendance"].map(lambda v: f"{v:.1f}")
     display["total_hours"] = display["total_hours"].map(lambda v: f"{v:.1f}")
 
@@ -122,6 +147,7 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
         "average_attendance",
         "total_hours",
         "gross_revenue",
+        "net_revenue_per_class",
         "instructor_payout",
         "studio_net",
         "margin_pct",
@@ -137,6 +163,7 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
             "average_attendance": "Avg attendance",
             "total_hours": "Hours",
             "gross_revenue": "Gross revenue",
+            "net_revenue_per_class": "Net revenue / class",
             "instructor_payout": "Instructor payout",
             "studio_net": "Studio net",
             "margin_pct": "Margin",
