@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.data import aggregate_instructors, filter_instructor_performance, instructor_month_comparison
-from dashboard.shared import BAR_CHART_HEIGHT, BLACK, EUR, GREEN, GREEN_LIGHT, PLOTLY_CONFIG, operating_view_banner
+from dashboard.shared import BAR_CHART_HEIGHT, BLACK, EUR, GREEN, GREEN_LIGHT, PLOTLY_CONFIG
 
 
 def _horizontal_bars(
@@ -52,7 +52,6 @@ def _horizontal_bars(
 
 def render(raw: pd.DataFrame, start: date, end: date) -> None:
     st.title("Instructor Performance")
-    operating_view_banner()
     st.caption(
         "Rankings from Momence instructor reports. "
         "Popularity uses total bookings; profitability is gross revenue minus instructor payout "

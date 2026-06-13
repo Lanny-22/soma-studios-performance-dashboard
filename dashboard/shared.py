@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from dashboard.data import load_total_sales
+from dashboard.data import load_instructor_performance, load_total_sales
 from src.config import get_settings
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,17 +24,12 @@ BAR_CHART_HEIGHT = 480
 PLOTLY_CONFIG = {"displayModeBar": False, "responsive": True}
 DAY_MS = 24 * 60 * 60 * 1000
 
-LOGO_CANDIDATES = [
-    ROOT / "assets" / "SomaLogo.png",
-    ROOT / "assets" / "soma_logo.png",
-    ROOT / "assets" / "logo.png",
-]
+LOGO_PATH = ROOT / "assets" / "SomaLogo.png"
 
 
 def logo_source() -> str | None:
-    for path in LOGO_CANDIDATES:
-        if path.is_file():
-            return str(path)
+    if LOGO_PATH.is_file():
+        return str(LOGO_PATH)
     url = os.environ.get("LOGO_URL", "").strip()
     if url:
         return url
@@ -47,6 +42,9 @@ def logo_source() -> str | None:
 
 
 def show_logo(width: int = 180) -> None:
+    if LOGO_PATH.is_file():
+        st.image(LOGO_PATH.read_bytes(), width=width)
+        return
     source = logo_source()
     if source:
         st.image(source, width=width)
@@ -83,9 +81,25 @@ def sidebar_header() -> None:
     st.sidebar.divider()
 
 
+@st.cache_data(ttl=300, show_spinner="Loading instructor data from Supabase…")
+def cached_instructor_performance() -> pd.DataFrame:
+    return load_instructor_performance()
+
+
 @st.cache_data(ttl=300, show_spinner="Loading sales from Supabase…")
 def cached_sales() -> pd.DataFrame:
     return load_total_sales()
+
+
+def load_instructor_or_error() -> pd.DataFrame | None:
+    try:
+        return cached_instructor_performance()
+    except Exception as exc:
+        err = str(exc)
+        st.error("Could not load instructor performance data.")
+        with st.expander("Technical details"):
+            st.code(err)
+        return None
 
 
 def load_sales_or_error() -> pd.DataFrame | None:
