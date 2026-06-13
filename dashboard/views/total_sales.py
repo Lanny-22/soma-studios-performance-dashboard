@@ -1,6 +1,6 @@
 """Total sales overview — daily and cumulative charts."""
 
-from datetime import date
+from datetime import date, timedelta
 
 import plotly.graph_objects as go
 import pandas as pd
@@ -91,7 +91,7 @@ def _daily_chart(daily: pd.DataFrame, avg_daily: float, max_daily: float) -> Non
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
 
-def _cumulative_chart(daily: pd.DataFrame) -> None:
+def _cumulative_chart(daily: pd.DataFrame, avg_daily: float, show_forecast: bool) -> None:
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -114,7 +114,7 @@ def _cumulative_chart(daily: pd.DataFrame) -> None:
             x=[final_date],
             y=[final_val],
             mode="markers",
-            name="Final total",
+            name="Current total",
             marker=dict(size=14, color=BLACK, line=dict(width=2, color="#ffffff")),
             showlegend=False,
             hovertemplate=f"{final_date}<br>Cumulative: {label}<extra></extra>",
@@ -138,6 +138,48 @@ def _cumulative_chart(daily: pd.DataFrame) -> None:
         font=dict(size=14, color=BLACK),
     )
 
+    if show_forecast:
+        forecast_dates: list[date] = []
+        forecast_cums: list[float] = []
+        cum = final_val
+        for day_offset in range(1, 15):
+            forecast_date = final_date + timedelta(days=day_offset)
+            cum += avg_daily
+            forecast_dates.append(forecast_date)
+            forecast_cums.append(cum)
+
+        projected_total = forecast_cums[-1]
+        projected_label = EUR.format(projected_total)
+        projected_date = forecast_dates[-1]
+
+        fig.add_trace(
+            go.Scatter(
+                x=[final_date] + forecast_dates,
+                y=[final_val] + forecast_cums,
+                mode="lines",
+                name="14-day forecast",
+                line=dict(color=BLACK, width=2, dash="dot"),
+                hovertemplate="%{x}<br>Cumulative: %{y:,.0f}<extra></extra>",
+            )
+        )
+        fig.add_annotation(
+            x=projected_date,
+            y=projected_total,
+            text=projected_label,
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1.2,
+            arrowwidth=1.5,
+            arrowcolor=BLACK,
+            ax=50,
+            ay=-48,
+            bgcolor="rgba(255, 255, 255, 0.95)",
+            bordercolor=BLACK,
+            borderwidth=1,
+            borderpad=6,
+            font=dict(size=13, color=BLACK),
+        )
+
     fig.update_layout(
         title="Cumulative net sales",
         xaxis_title="Date",
@@ -146,6 +188,7 @@ def _cumulative_chart(daily: pd.DataFrame) -> None:
         margin=dict(l=48, r=24, t=56, b=48),
         hovermode="x unified",
         autosize=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
     )
     fig.update_yaxes(tickformat=",.0f")
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
@@ -179,7 +222,16 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
     _metric_row(daily, total, transactions, start, end)
 
     _daily_chart(daily, avg_daily, max_daily)
-    _cumulative_chart(daily)
+
+    st.radio(
+        "Include 14-day forecast",
+        options=["No", "Yes"],
+        horizontal=True,
+        help=f"Projects the next 14 days at average daily sales ({EUR.format(avg_daily)} per day).",
+        key="cumulative_forecast",
+    )
+    show_forecast = st.session_state.get("cumulative_forecast") == "Yes"
+    _cumulative_chart(daily, avg_daily, show_forecast)
 
     with st.expander("Category breakdown"):
         breakdown = (
