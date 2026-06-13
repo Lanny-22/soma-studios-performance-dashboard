@@ -9,6 +9,7 @@ from dashboard.shared import (
     sidebar_header,
 )
 from dashboard.views.packages import render as render_packages
+from dashboard.views.products import render as render_products
 from dashboard.views.total_sales import render as render_total_sales
 
 
@@ -22,6 +23,14 @@ def _run_total_sales() -> None:
 
 def _run_packages() -> None:
     render_packages(
+        st.session_state["dash_raw"],
+        st.session_state["dash_start"],
+        st.session_state["dash_end"],
+    )
+
+
+def _run_products() -> None:
+    render_products(
         st.session_state["dash_raw"],
         st.session_state["dash_start"],
         st.session_state["dash_end"],
@@ -66,6 +75,12 @@ def main() -> None:
                 title="Packages & Subscriptions",
                 icon="📦",
                 url_path="packages-subscriptions",
+            ),
+            st.Page(
+                _run_products,
+                title="Product Sales",
+                icon="🛍️",
+                url_path="product-sales",
             ),
         ],
     )
