@@ -37,7 +37,6 @@ def load_total_sales() -> pd.DataFrame:
 def filter_sales(
     df: pd.DataFrame,
     categories: list[str],
-    month_key: str,
     start: date,
     end: date,
 ) -> pd.DataFrame:
@@ -45,17 +44,6 @@ def filter_sales(
 
     if categories:
         filtered = filtered[filtered["category"].isin(categories)]
-
-    if month_key == "april":
-        filtered = filtered[
-            (filtered["sale_date"] >= date(2026, 4, 1))
-            & (filtered["sale_date"] <= date(2026, 4, 30))
-        ]
-    elif month_key == "may":
-        filtered = filtered[
-            (filtered["sale_date"] >= date(2026, 5, 1))
-            & (filtered["sale_date"] <= date(2026, 5, 31))
-        ]
 
     filtered = filtered[(filtered["sale_date"] >= start) & (filtered["sale_date"] <= end)]
     return filtered

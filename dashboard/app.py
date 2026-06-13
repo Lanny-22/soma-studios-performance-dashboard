@@ -18,6 +18,8 @@ st.set_page_config(
 )
 
 EUR = "€{:,.2f}"
+CHART_HEIGHT = 620
+PLOTLY_CONFIG = {"displayModeBar": False, "responsive": True}
 
 
 def _password_gate() -> bool:
@@ -42,12 +44,33 @@ def _password_gate() -> bool:
     return False
 
 
-def _metric_row(total: float, transactions: int, days: int) -> None:
-    avg_daily = total / days if days else 0
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Net sales", EUR.format(total))
-    c2.metric("Transactions", f"{transactions:,}")
-    c3.metric("Avg daily sales", EUR.format(avg_daily))
+def _metric_row(
+    daily: pd.DataFrame,
+    total: float,
+    transactions: int,
+    start: date,
+    end: date,
+) -> None:
+    calendar_days = max((end - start).days + 1, 1)
+    avg_daily = total / calendar_days
+
+    best_idx = daily["net_sales"].idxmax()
+    best_date = daily.loc[best_idx, "sale_date"]
+    best_val = float(daily.loc[best_idx, "net_sales"])
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Net sales (filtered)", EUR.format(total), help=f"{transactions:,} transactions")
+    c2.metric(
+        "Best single day",
+        EUR.format(best_val),
+        help=f"Peak net sales on {best_date}",
+    )
+    c3.metric(
+        "Average daily sales",
+        EUR.format(avg_daily),
+        help=f"Net sales ÷ {calendar_days} days in selected range",
+    )
+    c4.metric("Days with sales", f"{len(daily):,}", help=f"Out of {calendar_days} days in range")
 
 
 def _daily_chart(daily: pd.DataFrame) -> None:
@@ -58,18 +81,20 @@ def _daily_chart(daily: pd.DataFrame) -> None:
             y=daily["net_sales"],
             name="Daily net sales",
             marker_color="#2d6a4f",
+            width=0.85,
         )
     )
     fig.update_layout(
         title="Daily net sales",
         xaxis_title="Date",
         yaxis_title="Net sales (EUR)",
-        height=420,
-        margin=dict(l=40, r=20, t=50, b=40),
+        height=CHART_HEIGHT,
+        margin=dict(l=48, r=24, t=56, b=48),
         hovermode="x unified",
+        autosize=True,
     )
     fig.update_yaxes(tickformat=",.0f")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
 
 def _cumulative_chart(daily: pd.DataFrame) -> None:
@@ -81,19 +106,20 @@ def _cumulative_chart(daily: pd.DataFrame) -> None:
             mode="lines+markers",
             name="Cumulative net sales",
             line=dict(color="#40916c", width=3),
-            marker=dict(size=6),
+            marker=dict(size=8),
         )
     )
     fig.update_layout(
         title="Cumulative net sales",
         xaxis_title="Date",
         yaxis_title="Cumulative net sales (EUR)",
-        height=420,
-        margin=dict(l=40, r=20, t=50, b=40),
+        height=CHART_HEIGHT,
+        margin=dict(l=48, r=24, t=56, b=48),
         hovermode="x unified",
+        autosize=True,
     )
     fig.update_yaxes(tickformat=",.0f")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
 
 @st.cache_data(ttl=300, show_spinner="Loading sales from Supabase…")
@@ -106,7 +132,7 @@ def main() -> None:
         return
 
     st.title("Total Sales")
-    st.caption("Momence Total Sales report · April & May 2026")
+    st.caption("Momence Total Sales · filtered view")
 
     if st.sidebar.button("Sign out"):
         st.session_state.authenticated = False
@@ -138,30 +164,11 @@ def main() -> None:
 
     st.sidebar.header("Filters")
 
-    month_key = st.sidebar.radio(
-        "Month",
-        options=["all", "april", "may"],
-        format_func=lambda k: {
-            "all": "April + May",
-            "april": "April only",
-            "may": "May only",
-        }[k],
-        horizontal=True,
-    )
-
-    if month_key == "april":
-        range_min, range_max = date(2026, 4, 1), date(2026, 4, 30)
-    elif month_key == "may":
-        range_min, range_max = date(2026, 5, 1), date(2026, 5, 31)
-    else:
-        range_min, range_max = min_date, max_date
-
     start, end = st.sidebar.date_input(
         "Date range",
-        value=(range_min, range_max),
+        value=(min_date, max_date),
         min_value=min_date,
         max_value=max_date,
-        key=f"date_range_{month_key}",
     )
     if not isinstance(start, date):
         start, end = start[0], start[1]
@@ -173,7 +180,7 @@ def main() -> None:
         help="Momence category: Pack, Class, Product, Subscription, etc.",
     )
 
-    filtered = filter_sales(raw, selected_categories, month_key, start, end)
+    filtered = filter_sales(raw, selected_categories, start, end)
     daily = daily_totals(filtered)
 
     if filtered.empty:
@@ -182,14 +189,10 @@ def main() -> None:
 
     total = filtered["net_sales"].sum()
     transactions = len(filtered)
-    days = daily["sale_date"].nunique()
-    _metric_row(total, transactions, days)
+    _metric_row(daily, total, transactions, start, end)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        _daily_chart(daily)
-    with col2:
-        _cumulative_chart(daily)
+    _daily_chart(daily)
+    _cumulative_chart(daily)
 
     with st.expander("Category breakdown"):
         breakdown = (
