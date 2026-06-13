@@ -57,3 +57,16 @@ def daily_totals(df: pd.DataFrame) -> pd.DataFrame:
     )
     daily["cumulative_sales"] = daily["net_sales"].cumsum()
     return daily
+
+
+def item_breakdown(df: pd.DataFrame, categories: list[str]) -> pd.DataFrame:
+    subset = df[df["category"].isin(categories)].copy()
+    if subset.empty:
+        return pd.DataFrame(columns=["category", "item", "net_sales", "sales_count"])
+
+    breakdown = (
+        subset.groupby(["category", "item"], as_index=False)
+        .agg(net_sales=("net_sales", "sum"), sales_count=("sale_reference", "count"))
+        .sort_values("net_sales", ascending=False)
+    )
+    return breakdown
