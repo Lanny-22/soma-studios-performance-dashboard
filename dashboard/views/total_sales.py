@@ -45,6 +45,7 @@ def _metric_row(
 
 
 REF_LINE = "rgba(27, 27, 27, 0.2)"
+BAND_FILL = "rgba(27, 27, 27, 0.18)"
 
 
 def _daily_chart(daily: pd.DataFrame, avg_daily: float, max_daily: float) -> None:
@@ -139,19 +140,58 @@ def _cumulative_chart(daily: pd.DataFrame, avg_daily: float, show_forecast: bool
     )
 
     if show_forecast:
+        daily_std = float(daily["net_sales"].std(ddof=1)) if len(daily) > 1 else 0.0
+        if pd.isna(daily_std):
+            daily_std = 0.0
+
         forecast_dates: list[date] = []
         forecast_cums: list[float] = []
+        band_high: list[float] = [final_val]
+        band_low: list[float] = [final_val]
+        band_x: list[date] = [final_date]
+
         cum = final_val
+        cum_high = final_val
+        cum_low = final_val
         for day_offset in range(1, 15):
             forecast_date = final_date + timedelta(days=day_offset)
             cum += avg_daily
+            low_daily = max(0.0, avg_daily - daily_std)
+            high_daily = avg_daily + daily_std
+            cum_high += high_daily
+            cum_low += low_daily
             forecast_dates.append(forecast_date)
             forecast_cums.append(cum)
+            band_x.append(forecast_date)
+            band_high.append(cum_high)
+            band_low.append(cum_low)
 
         projected_total = forecast_cums[-1]
         projected_label = EUR.format(projected_total)
         projected_date = forecast_dates[-1]
 
+        fig.add_trace(
+            go.Scatter(
+                x=band_x,
+                y=band_high,
+                mode="lines",
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=band_x,
+                y=band_low,
+                mode="lines",
+                fill="tonexty",
+                fillcolor=BAND_FILL,
+                line=dict(width=0),
+                name="Variance band (±1σ daily)",
+                hoverinfo="skip",
+            )
+        )
         fig.add_trace(
             go.Scatter(
                 x=[final_date] + forecast_dates,
@@ -227,7 +267,10 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
         "Include 14-day forecast",
         options=["No", "Yes"],
         horizontal=True,
-        help=f"Projects the next 14 days at average daily sales ({EUR.format(avg_daily)} per day).",
+        help=(
+            f"Projects the next 14 days at average daily sales ({EUR.format(avg_daily)}), "
+            "with a shaded band using ±1 standard deviation of daily sales."
+        ),
         key="cumulative_forecast",
     )
     show_forecast = st.session_state.get("cumulative_forecast") == "Yes"
