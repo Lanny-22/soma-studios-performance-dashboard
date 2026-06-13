@@ -67,13 +67,13 @@ def _daily_chart(daily: pd.DataFrame, avg_daily: float, max_daily: float) -> Non
         y=max_daily,
         line_dash="dot",
         line_color=REF_LINE,
-        line_width=1,
+        line_width=2.5,
     )
     fig.add_hline(
         y=avg_daily,
         line_dash="dot",
         line_color=REF_LINE,
-        line_width=1,
+        line_width=2.5,
     )
     fig.update_layout(
         title="Daily net sales",
