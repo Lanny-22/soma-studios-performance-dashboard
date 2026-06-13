@@ -44,7 +44,10 @@ def _metric_row(
     c4.metric("Days with sales", f"{len(daily):,}", help=f"Out of {calendar_days} days in range")
 
 
-def _daily_chart(daily: pd.DataFrame) -> None:
+REF_LINE = "rgba(27, 27, 27, 0.2)"
+
+
+def _daily_chart(daily: pd.DataFrame, avg_daily: float, max_daily: float) -> None:
     labels = daily["net_sales"].map(lambda v: f"€{v:,.0f}")
     fig = go.Figure()
     fig.add_trace(
@@ -59,6 +62,18 @@ def _daily_chart(daily: pd.DataFrame) -> None:
             textangle=-90,
             cliponaxis=False,
         )
+    )
+    fig.add_hline(
+        y=max_daily,
+        line_dash="dot",
+        line_color=REF_LINE,
+        line_width=1,
+    )
+    fig.add_hline(
+        y=avg_daily,
+        line_dash="dot",
+        line_color=REF_LINE,
+        line_width=1,
     )
     fig.update_layout(
         title="Daily net sales",
@@ -157,9 +172,13 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
 
     total = filtered["net_sales"].sum()
     transactions = len(filtered)
+    calendar_days = max((end - start).days + 1, 1)
+    avg_daily = total / calendar_days
+    max_daily = float(daily["net_sales"].max())
+
     _metric_row(daily, total, transactions, start, end)
 
-    _daily_chart(daily)
+    _daily_chart(daily, avg_daily, max_daily)
     _cumulative_chart(daily)
 
     with st.expander("Category breakdown"):
