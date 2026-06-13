@@ -7,12 +7,12 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.data import item_breakdown
-from dashboard.shared import BAR_CHART_HEIGHT, EUR, GREEN, GREEN_LIGHT, PLOTLY_CONFIG, filter_date_range
+from dashboard.shared import BAR_CHART_HEIGHT, BLACK, EUR, GREEN, PLOTLY_CONFIG, filter_date_range
 
 PACK_CATEGORY = "Pack"
 SUB_CATEGORY = "Subscription"
 PACK_COLOR = GREEN
-SUB_COLOR = GREEN_LIGHT
+SUB_COLOR = BLACK
 CATEGORY_COLORS = {PACK_CATEGORY: PACK_COLOR, SUB_CATEGORY: SUB_COLOR}
 CATEGORY_LABELS = {PACK_CATEGORY: "Package", SUB_CATEGORY: "Subscription"}
 
@@ -28,42 +28,43 @@ def _horizontal_bars(
         st.info("No sales in this category for the selected range.")
         return
 
+    # Lowest → highest so the top bar is the highest value
     plot_df = df.sort_values(value_col, ascending=True)
+    y_order = plot_df["item"].tolist()
+
     fig = go.Figure()
+    bar_colors = (
+        plot_df["category"].map(CATEGORY_COLORS)
+        if color_by_category
+        else plot_df["category"].map({PACK_CATEGORY: PACK_COLOR, SUB_CATEGORY: SUB_COLOR})
+    )
+
+    fig.add_trace(
+        go.Bar(
+            x=plot_df[value_col],
+            y=plot_df["item"],
+            orientation="h",
+            marker_color=bar_colors,
+            text=plot_df[value_col].map(
+                lambda v: f"{v:,.0f}" if value_col == "sales_count" else EUR.format(v)
+            ),
+            textposition="outside",
+            showlegend=False,
+        )
+    )
 
     if color_by_category:
-        for category in plot_df["category"].unique():
-            subset = plot_df[plot_df["category"] == category].sort_values(value_col, ascending=True)
-            text = subset[value_col].map(
-                lambda v: f"{v:,.0f}" if value_col == "sales_count" else EUR.format(v)
-            )
-            fig.add_trace(
-                go.Bar(
-                    x=subset[value_col],
-                    y=subset["item"],
-                    orientation="h",
-                    name=CATEGORY_LABELS.get(category, category),
-                    marker_color=CATEGORY_COLORS.get(category, PACK_COLOR),
-                    text=text,
-                    textposition="outside",
+        for category, color in CATEGORY_COLORS.items():
+            if category in plot_df["category"].values:
+                fig.add_trace(
+                    go.Bar(
+                        x=[None],
+                        y=[None],
+                        marker_color=color,
+                        name=CATEGORY_LABELS[category],
+                        showlegend=True,
+                    )
                 )
-            )
-        fig.update_layout(showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
-    else:
-        color = PACK_COLOR if plot_df["category"].iloc[0] == PACK_CATEGORY else SUB_COLOR
-        fig.add_trace(
-            go.Bar(
-                x=plot_df[value_col],
-                y=plot_df["item"],
-                orientation="h",
-                marker_color=color,
-                text=plot_df[value_col].map(
-                    lambda v: f"{v:,.0f}" if value_col == "sales_count" else EUR.format(v)
-                ),
-                textposition="outside",
-                showlegend=False,
-            )
-        )
 
     left_margin = min(320, 40 + plot_df["item"].str.len().max() * 5)
     fig.update_layout(
@@ -72,7 +73,8 @@ def _horizontal_bars(
         height=max(BAR_CHART_HEIGHT, 80 + len(plot_df) * 36),
         margin=dict(l=left_margin, r=80, t=72 if color_by_category else 56, b=48),
         autosize=True,
-        barmode="overlay",
+        yaxis=dict(categoryorder="array", categoryarray=y_order),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
     )
     if value_col == "net_sales":
         fig.update_xaxes(tickformat=",.0f")
