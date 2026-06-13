@@ -113,6 +113,41 @@ def _cumulative_chart(daily: pd.DataFrame) -> None:
             marker=dict(size=8),
         )
     )
+
+    last = daily.iloc[-1]
+    final_date = last["sale_date"]
+    final_val = float(last["cumulative_sales"])
+    label = EUR.format(final_val)
+
+    fig.add_trace(
+        go.Scatter(
+            x=[final_date],
+            y=[final_val],
+            mode="markers",
+            name="Final total",
+            marker=dict(size=14, color="#2d6a4f", line=dict(width=2, color="#ffffff")),
+            showlegend=False,
+            hovertemplate=f"{final_date}<br>Cumulative: {label}<extra></extra>",
+        )
+    )
+    fig.add_annotation(
+        x=final_date,
+        y=final_val,
+        text=label,
+        showarrow=True,
+        arrowhead=2,
+        arrowsize=1.2,
+        arrowwidth=1.5,
+        arrowcolor="#40916c",
+        ax=50,
+        ay=-48,
+        bgcolor="rgba(255, 255, 255, 0.95)",
+        bordercolor="#40916c",
+        borderwidth=1,
+        borderpad=6,
+        font=dict(size=14, color="#1b1b1b"),
+    )
+
     fig.update_layout(
         title="Cumulative net sales",
         xaxis_title="Date",
