@@ -45,6 +45,7 @@ def _metric_row(
 
 
 def _daily_chart(daily: pd.DataFrame) -> None:
+    labels = daily["net_sales"].map(lambda v: f"€{v:,.0f}")
     fig = go.Figure()
     fig.add_trace(
         go.Bar(
@@ -53,6 +54,10 @@ def _daily_chart(daily: pd.DataFrame) -> None:
             name="Daily net sales",
             marker_color=GREEN,
             width=DAY_MS * 0.92,
+            text=labels,
+            textposition="outside",
+            textangle=-90,
+            cliponaxis=False,
         )
     )
     fig.update_layout(
@@ -60,10 +65,12 @@ def _daily_chart(daily: pd.DataFrame) -> None:
         xaxis_title="Date",
         yaxis_title="Net sales (EUR)",
         height=CHART_HEIGHT,
-        margin=dict(l=48, r=24, t=56, b=48),
+        margin=dict(l=48, r=24, t=80, b=48),
         hovermode="x unified",
         autosize=True,
         bargap=0.06,
+        uniformtext_minsize=8,
+        uniformtext_mode="hide",
     )
     fig.update_yaxes(tickformat=",.0f")
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
