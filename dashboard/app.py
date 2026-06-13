@@ -115,8 +115,18 @@ def main() -> None:
     try:
         raw = _cached_sales()
     except Exception as exc:
-        st.error("Could not connect to Supabase. Check DATABASE_URL in Streamlit secrets.")
-        st.caption(f"Details: {exc}")
+        err = str(exc)
+        st.error("Could not connect to Supabase.")
+        if "authentication failures" in err or "CIRCUITBREAKER" in err:
+            st.warning(
+                "Supabase blocked connections after repeated **wrong database password** attempts. "
+                "Stop the app (Reboot), wait 2 minutes, then fix **DATABASE_URL** in Streamlit secrets — "
+                "it must be your **Supabase database password** (from .env), not your dashboard login password."
+            )
+        else:
+            st.caption("Check DATABASE_URL in Streamlit secrets.")
+        with st.expander("Technical details"):
+            st.code(err)
         return
     if raw.empty:
         st.warning("No sales data found in momence_total_sales.")
