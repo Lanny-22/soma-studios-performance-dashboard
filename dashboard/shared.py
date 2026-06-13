@@ -25,8 +25,8 @@ PLOTLY_CONFIG = {"displayModeBar": False, "responsive": True}
 DAY_MS = 24 * 60 * 60 * 1000
 
 LOGO_CANDIDATES = [
+    ROOT / "assets" / "SomaLogo.png",
     ROOT / "assets" / "soma_logo.png",
-    ROOT / "assets" / "soma_logo.jpg",
     ROOT / "assets" / "logo.png",
 ]
 
