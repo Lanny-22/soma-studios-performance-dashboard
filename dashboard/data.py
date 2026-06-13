@@ -49,11 +49,11 @@ def load_total_sales() -> pd.DataFrame:
     return df
 
 
-def _with_revenue_per_class(grouped: pd.DataFrame) -> pd.DataFrame:
+def _with_per_class_metrics(grouped: pd.DataFrame) -> pd.DataFrame:
     grouped = grouped.copy()
-    grouped["revenue_per_class"] = (
-        grouped["net_sales"] / grouped["class_sessions"].replace(0, pd.NA)
-    ).fillna(0)
+    sessions = grouped["class_sessions"].replace(0, pd.NA)
+    grouped["revenue_per_class"] = (grouped["net_sales"] / sessions).fillna(0)
+    grouped["utilization_per_class"] = (grouped["transactions"] / sessions).fillna(0)
     return grouped
 
 
@@ -76,7 +76,7 @@ def schedule_timing_matrix(df: pd.DataFrame) -> pd.DataFrame:
         class_sessions=("service_at", "nunique"),
     )
     matrix["service_hour"] = matrix["service_hour"].astype(int)
-    return _with_revenue_per_class(matrix)
+    return _with_per_class_metrics(matrix)
 
 
 def day_of_week_totals(df: pd.DataFrame) -> pd.DataFrame:
@@ -88,7 +88,7 @@ def day_of_week_totals(df: pd.DataFrame) -> pd.DataFrame:
         class_sessions=("service_at", "nunique"),
     )
     totals["service_day"] = pd.Categorical(totals["service_day"], categories=DAY_ORDER, ordered=True)
-    return _with_revenue_per_class(totals.sort_values("service_day"))
+    return _with_per_class_metrics(totals.sort_values("service_day"))
 
 
 def hour_totals(df: pd.DataFrame) -> pd.DataFrame:
@@ -104,7 +104,7 @@ def hour_totals(df: pd.DataFrame) -> pd.DataFrame:
         .sort_values("service_hour")
     )
     totals["service_hour"] = totals["service_hour"].astype(int)
-    return _with_revenue_per_class(totals)
+    return _with_per_class_metrics(totals)
 
 
 def filter_sales(

@@ -24,22 +24,31 @@ from dashboard.shared import (
 
 METRIC_TOTAL = "Total net sales"
 METRIC_PER_CLASS = "Net sales per class"
-METRIC_OPTIONS = [METRIC_TOTAL, METRIC_PER_CLASS]
-VALUE_COL = {
-    METRIC_TOTAL: "net_sales",
-    METRIC_PER_CLASS: "revenue_per_class",
+METRIC_UTILIZATION = "Utilization per class"
+METRIC_OPTIONS = [METRIC_TOTAL, METRIC_PER_CLASS, METRIC_UTILIZATION]
+
+# value column, axis label, format kind: currency | rate | count
+METRIC_CONFIG: dict[str, tuple[str, str, str]] = {
+    METRIC_TOTAL: ("net_sales", "Net sales (EUR)", "currency"),
+    METRIC_PER_CLASS: ("revenue_per_class", "Net sales per class (€)", "currency"),
+    METRIC_UTILIZATION: (
+        "utilization_per_class",
+        "Bookings per class (utilization)",
+        "rate",
+    ),
 }
 
 
-def _metric_label(metric: str) -> str:
-    return "Net sales per class (€)" if metric == METRIC_PER_CLASS else "Net sales (EUR)"
-
-
 def _format_value(metric: str, value: float) -> str:
-    return EUR.format(value)
+    kind = METRIC_CONFIG[metric][2]
+    if kind == "currency":
+        return EUR.format(value)
+    if kind == "rate":
+        return f"{value:.1f}"
+    return f"{int(value)}"
 
 
-def _heatmap(matrix: pd.DataFrame, value_col: str, title: str, currency: bool = True) -> None:
+def _heatmap(matrix: pd.DataFrame, value_col: str, title: str, kind: str) -> None:
     if matrix.empty:
         st.info("No class sessions in this range.")
         return
@@ -66,12 +75,15 @@ def _heatmap(matrix: pd.DataFrame, value_col: str, title: str, currency: bool = 
         return
 
     z_max = max(max(row) for row in z_rows)
-    if currency:
+    if kind == "currency":
         hover = "%{y} %{x}<br>€%{z:,.2f}<extra></extra>"
         colorbar_title = "€"
+    elif kind == "rate":
+        hover = "%{y} %{x}<br>%{z:.1f} bookings/class<extra></extra>"
+        colorbar_title = "Bookings/class"
     else:
         hover = "%{y} %{x}<br>Count: %{z:,.0f}<extra></extra>"
-        colorbar_title = "Sessions"
+        colorbar_title = "Count"
 
     fig = go.Figure(
         data=go.Heatmap(
@@ -107,7 +119,7 @@ def _bar_chart(
     if df.empty:
         return
 
-    value_col = VALUE_COL[metric]
+    value_col, y_label, kind = METRIC_CONFIG[metric]
     labels = df[x_col]
     if x_col == "service_hour":
         labels = df[x_col].map(lambda h: f"{int(h):02d}:00")
@@ -124,12 +136,14 @@ def _bar_chart(
     fig.update_layout(
         title=title,
         xaxis_title=x_title,
-        yaxis_title=_metric_label(metric),
+        yaxis_title=y_label,
         height=CHART_HEIGHT // 2,
         margin=dict(l=48, r=24, t=56, b=48),
     )
-    if metric == METRIC_TOTAL:
+    if kind == "currency":
         fig.update_yaxes(tickformat=",.0f")
+    elif kind == "rate":
+        fig.update_yaxes(tickformat=".1f")
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
 
@@ -137,8 +151,8 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
     st.title("Peak Times")
     st.caption(
         "When classes run (Momence **service date/time**, Malta). "
-        "Use **per class** to compare slots fairly — busy hours often have more sessions, "
-        "not necessarily better revenue per class."
+        "Compare **net sales per class** and **utilization per class** (avg bookings per session) "
+        "to judge slots fairly — busy hours often run more classes, not better ones."
     )
 
     category = st.sidebar.radio(
@@ -150,7 +164,7 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
     metric = st.sidebar.radio(
         "Compare by",
         options=METRIC_OPTIONS,
-        horizontal=True,
+        horizontal=False,
         key="peak_times_metric",
     )
 
@@ -164,13 +178,18 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
     total = filtered["net_sales"].sum()
     class_sessions = int(filtered["service_at"].nunique())
     transactions = len(filtered)
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Net sales", EUR.format(total))
     c2.metric("Class sessions", f"{class_sessions:,}")
     c3.metric("Bookings", f"{transactions:,}")
     c4.metric(
-        "Avg per class",
+        "Net sales / class",
         EUR.format(total / class_sessions) if class_sessions else "—",
+    )
+    c5.metric(
+        "Utilization / class",
+        f"{transactions / class_sessions:.1f}" if class_sessions else "—",
+        help="Average bookings per class session in this range.",
     )
 
     tab_day, tab_hour, tab_matrix = st.tabs(
@@ -180,7 +199,7 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
     matrix = schedule_timing_matrix(filtered)
     days = day_of_week_totals(filtered)
     hours = hour_totals(filtered)
-    value_col = VALUE_COL[metric]
+    value_col, _, kind = METRIC_CONFIG[metric]
 
     with tab_day:
         _bar_chart(
@@ -217,6 +236,11 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
             )
 
     with tab_matrix:
-        _heatmap(matrix, value_col, f"{metric} by day and hour")
+        _heatmap(matrix, value_col, f"{metric} by day and hour", kind)
         with st.expander("Class session counts"):
-            _heatmap(matrix, "class_sessions", "Class sessions by day and hour", currency=False)
+            _heatmap(
+                matrix,
+                "class_sessions",
+                "Class sessions by day and hour",
+                "count",
+            )
