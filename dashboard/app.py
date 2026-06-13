@@ -3,15 +3,12 @@
 import streamlit as st
 
 from dashboard.shared import (
-    load_instructor_or_error,
     load_sales_or_error,
     password_gate,
     sidebar_date_range,
     sidebar_header,
 )
-from dashboard.views.instructors import render as render_instructors
 from dashboard.views.packages import render as render_packages
-from dashboard.views.peak_times import render as render_peak_times
 from dashboard.views.products import render as render_products
 from dashboard.views.total_sales import render as render_total_sales
 
@@ -34,26 +31,6 @@ def _run_packages() -> None:
 
 def _run_products() -> None:
     render_products(
-        st.session_state["dash_raw"],
-        st.session_state["dash_start"],
-        st.session_state["dash_end"],
-    )
-
-
-def _run_instructors() -> None:
-    raw = st.session_state.get("dash_instructor_raw")
-    if raw is None or raw.empty:
-        st.warning("No instructor performance data found.")
-        return
-    render_instructors(
-        raw,
-        st.session_state["dash_start"],
-        st.session_state["dash_end"],
-    )
-
-
-def _run_peak_times() -> None:
-    render_peak_times(
         st.session_state["dash_raw"],
         st.session_state["dash_start"],
         st.session_state["dash_end"],
@@ -83,7 +60,6 @@ def main() -> None:
     st.session_state["dash_raw"] = raw
     st.session_state["dash_start"] = start
     st.session_state["dash_end"] = end
-    st.session_state["dash_instructor_raw"] = load_instructor_or_error()
 
     nav = st.navigation(
         [
@@ -105,18 +81,6 @@ def main() -> None:
                 title="Product Sales",
                 icon="🛍️",
                 url_path="product-sales",
-            ),
-            st.Page(
-                _run_instructors,
-                title="Instructor Performance",
-                icon="🧘",
-                url_path="instructor-performance",
-            ),
-            st.Page(
-                _run_peak_times,
-                title="Peak Times",
-                icon="🕐",
-                url_path="peak-times",
             ),
         ],
     )
