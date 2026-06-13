@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.data import item_breakdown
-from dashboard.shared import BAR_CHART_HEIGHT, BLACK, EUR, GREEN, PLOTLY_CONFIG, filter_date_range
+from dashboard.shared import BAR_CHART_HEIGHT, BLACK, EUR, GREEN, PLOTLY_CONFIG, filter_date_range, operating_view_banner
 
 PACK_CATEGORY = "Pack"
 SUB_CATEGORY = "Subscription"
@@ -97,6 +97,7 @@ def _category_metrics(df: pd.DataFrame, label: str) -> None:
 
 def render(raw: pd.DataFrame, start: date, end: date) -> None:
     st.title("Packages & Subscriptions")
+    operating_view_banner()
     st.caption("Which packs and memberships sell most in the selected period")
 
     focus = st.sidebar.radio(

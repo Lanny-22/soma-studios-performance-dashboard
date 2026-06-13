@@ -6,8 +6,8 @@ import plotly.graph_objects as go
 import pandas as pd
 import streamlit as st
 
-from dashboard.data import aggregate_instructors, filter_instructor_performance
-from dashboard.shared import BAR_CHART_HEIGHT, BLACK, EUR, GREEN, GREEN_LIGHT, PLOTLY_CONFIG
+from dashboard.data import aggregate_instructors, filter_instructor_performance, instructor_month_comparison
+from dashboard.shared import BAR_CHART_HEIGHT, BLACK, EUR, GREEN, GREEN_LIGHT, PLOTLY_CONFIG, operating_view_banner
 
 
 def _horizontal_bars(
@@ -52,6 +52,7 @@ def _horizontal_bars(
 
 def render(raw: pd.DataFrame, start: date, end: date) -> None:
     st.title("Instructor Performance")
+    operating_view_banner()
     st.caption(
         "Rankings from Momence instructor reports. "
         "Popularity uses total bookings; profitability is gross revenue minus instructor payout "
@@ -128,6 +129,36 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
             "net_revenue_per_class",
             "Net revenue per class (€)",
             GREEN_LIGHT,
+        )
+
+    st.subheader("Month-over-month")
+    month_table = instructor_month_comparison(raw, start, end)
+    if month_table.empty:
+        st.info("No monthly instructor reports overlap the selected date range.")
+    else:
+        display_month = month_table.copy()
+        for col in display_month.columns:
+            if col.startswith("net_per_class_") or col == "net_per_class_change":
+                display_month[col] = display_month[col].map(
+                    lambda v: EUR.format(v) if pd.notna(v) else "—"
+                )
+            elif col.startswith("studio_net_"):
+                display_month[col] = display_month[col].map(
+                    lambda v: EUR.format(v) if pd.notna(v) else "—"
+                )
+            elif col.startswith("attendance_"):
+                display_month[col] = display_month[col].map(
+                    lambda v: f"{v:.1f}" if pd.notna(v) else "—"
+                )
+            elif col.startswith("classes_") or col == "classes_change":
+                display_month[col] = display_month[col].map(
+                    lambda v: f"{int(v)}" if pd.notna(v) else "—"
+                )
+
+        st.dataframe(display_month, use_container_width=True, hide_index=True)
+        st.caption(
+            "Monthly columns come from Momence instructor exports (full calendar months). "
+            "Change columns compare the first and last month in your selected range."
         )
 
     st.subheader("Full instructor table")

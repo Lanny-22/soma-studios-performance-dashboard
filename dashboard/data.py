@@ -7,9 +7,15 @@ import pandas as pd
 
 from src.db import get_conn
 
+OPERATING_START = date(2026, 5, 13)
+INTRO_PACK_ITEM = "3 Class Beginner Intro Pack - PRE-SALE OFFER"
+STUDIO_TIMEZONE = "Europe/Malta"
+DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
 SALES_QUERY = """
     SELECT
         payment_at,
+        service_at,
         sale_value,
         refunded,
         category,
@@ -27,12 +33,66 @@ def load_total_sales() -> pd.DataFrame:
     df = pd.DataFrame(rows)
 
     df["payment_at"] = pd.to_datetime(df["payment_at"], utc=True)
+    df["service_at"] = pd.to_datetime(df["service_at"], utc=True, errors="coerce")
     df["sale_date"] = df["payment_at"].dt.date
+    service_local = df["service_at"].dt.tz_convert(STUDIO_TIMEZONE)
+    df["service_date"] = service_local.dt.date
+    df["service_hour"] = service_local.dt.hour
+    df["service_day"] = service_local.dt.day_name()
     df["sale_value"] = pd.to_numeric(df["sale_value"], errors="coerce").fillna(0)
     df["refunded"] = pd.to_numeric(df["refunded"], errors="coerce").fillna(0)
     df["net_sales"] = df["sale_value"] - df["refunded"]
     df["category"] = df["category"].fillna("Unknown")
     return df
+
+
+def exclude_intro_pack(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    mask = df["item"].fillna("").ne(INTRO_PACK_ITEM)
+    mask &= ~df["item"].fillna("").str.contains("PRE-SALE", case=False)
+    return df.loc[mask].copy()
+
+
+def filter_service_date_range(df: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
+    if df.empty:
+        return df
+    has_service = df["service_at"].notna()
+    in_range = (df["service_date"] >= start) & (df["service_date"] <= end)
+    return df.loc[has_service & in_range].copy()
+
+
+def schedule_timing_matrix(df: pd.DataFrame) -> pd.DataFrame:
+    """Net sales aggregated by day-of-week and hour (studio local time)."""
+    if df.empty:
+        return pd.DataFrame()
+
+    matrix = (
+        df.groupby(["service_day", "service_hour"], as_index=False)
+        .agg(net_sales=("net_sales", "sum"), transactions=("sale_reference", "count"))
+    )
+    return matrix
+
+
+def day_of_week_totals(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+    totals = (
+        df.groupby("service_day", as_index=False)
+        .agg(net_sales=("net_sales", "sum"), transactions=("sale_reference", "count"))
+    )
+    totals["service_day"] = pd.Categorical(totals["service_day"], categories=DAY_ORDER, ordered=True)
+    return totals.sort_values("service_day")
+
+
+def hour_totals(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+    return (
+        df.groupby("service_hour", as_index=False)
+        .agg(net_sales=("net_sales", "sum"), transactions=("sale_reference", "count"))
+        .sort_values("service_hour")
+    )
 
 
 def filter_sales(
@@ -163,3 +223,60 @@ def aggregate_instructors(df: pd.DataFrame) -> pd.DataFrame:
     return weighted.drop(columns=["att_weight"]).sort_values(
         "total_bookings", ascending=False
     )
+
+
+def instructor_month_comparison(df: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
+    """Wide instructor table with one column per report month in range."""
+    filtered = filter_instructor_performance(df, start, end)
+    if filtered.empty:
+        return pd.DataFrame()
+
+    rows = filtered.copy()
+    rows["month_label"] = rows["report_month"].apply(
+        lambda d: d.strftime("%b %Y") if isinstance(d, date) else str(d)
+    )
+    rows["net_revenue_per_class"] = (
+        rows["studio_net"] / rows["class_count"].replace(0, pd.NA)
+    ).fillna(0)
+
+    month_order = (
+        rows[["report_month", "month_label"]]
+        .drop_duplicates()
+        .sort_values("report_month")["month_label"]
+        .tolist()
+    )
+
+    records: list[dict] = []
+    for name, group in rows.groupby("instructor_name"):
+        record: dict = {"instructor_name": name}
+        for month_label in month_order:
+            month_rows = group[group["month_label"] == month_label]
+            if month_rows.empty:
+                record[f"classes_{month_label}"] = None
+                record[f"attendance_{month_label}"] = None
+                record[f"net_per_class_{month_label}"] = None
+                record[f"studio_net_{month_label}"] = None
+                continue
+            row = month_rows.iloc[0]
+            record[f"classes_{month_label}"] = int(row["class_count"])
+            record[f"attendance_{month_label}"] = float(row["average_attendance"])
+            record[f"net_per_class_{month_label}"] = float(row["net_revenue_per_class"])
+            record[f"studio_net_{month_label}"] = float(row["studio_net"])
+        records.append(record)
+
+    wide = pd.DataFrame(records)
+    if not wide.empty and len(month_order) >= 2:
+        first, last = month_order[0], month_order[-1]
+        c0 = f"classes_{first}"
+        c1 = f"classes_{last}"
+        if c0 in wide.columns and c1 in wide.columns:
+            wide["classes_change"] = wide[c1] - wide[c0]
+        n0 = f"net_per_class_{first}"
+        n1 = f"net_per_class_{last}"
+        if n0 in wide.columns and n1 in wide.columns:
+            wide["net_per_class_change"] = wide[n1] - wide[n0]
+
+    sort_col = f"studio_net_{month_order[-1]}" if month_order else None
+    if sort_col and sort_col in wide.columns:
+        wide = wide.sort_values(sort_col, ascending=False, na_position="last")
+    return wide

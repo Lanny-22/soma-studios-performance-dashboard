@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from dashboard.data import load_instructor_performance, load_total_sales
+from dashboard.data import OPERATING_START, exclude_intro_pack, load_instructor_performance, load_total_sales
 from src.config import get_settings
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -127,16 +127,51 @@ def date_bounds(raw: pd.DataFrame) -> tuple[date, date]:
 def sidebar_date_range(raw: pd.DataFrame, header: str = "Filters") -> tuple[date, date]:
     min_date, max_date = date_bounds(raw)
     st.sidebar.header(header)
+    operating = st.session_state.get("operating_view", True)
+    if operating:
+        min_date = max(min_date, OPERATING_START)
+    default_start = max(min_date, OPERATING_START) if operating else raw["sale_date"].min()
+    default_end = max_date
+    if "global_date_range" not in st.session_state:
+        st.session_state["global_date_range"] = (default_start, default_end)
+
     start, end = st.sidebar.date_input(
         "Date range",
-        value=(min_date, max_date),
         min_value=min_date,
         max_value=max_date,
         key="global_date_range",
     )
     if not isinstance(start, date):
         start, end = start[0], start[1]
+    if operating and start < OPERATING_START:
+        start = OPERATING_START
     return start, end
+
+
+def sidebar_operating_view() -> bool:
+    return st.sidebar.checkbox(
+        "Operating view",
+        value=st.session_state.get("operating_view", True),
+        help=(
+            f"From {OPERATING_START.strftime('%d %b %Y')} onward and excludes "
+            "the pre-sale intro pack. Recommended for day-to-day insights."
+        ),
+        key="operating_view",
+    )
+
+
+def operating_view_banner() -> None:
+    if st.session_state.get("operating_view", True):
+        st.caption(
+            f"Operating view · from {OPERATING_START.strftime('%d %b %Y')} · intro pack excluded"
+        )
+
+
+def prepare_sales_data(raw: pd.DataFrame, operating: bool) -> pd.DataFrame:
+    sales = raw.copy()
+    if operating:
+        sales = exclude_intro_pack(sales)
+    return sales
 
 
 def filter_date_range(df: pd.DataFrame, start: date, end: date) -> pd.DataFrame:

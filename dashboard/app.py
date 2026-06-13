@@ -6,11 +6,14 @@ from dashboard.shared import (
     load_instructor_or_error,
     load_sales_or_error,
     password_gate,
+    prepare_sales_data,
     sidebar_date_range,
     sidebar_header,
+    sidebar_operating_view,
 )
 from dashboard.views.instructors import render as render_instructors
 from dashboard.views.packages import render as render_packages
+from dashboard.views.peak_times import render as render_peak_times
 from dashboard.views.products import render as render_products
 from dashboard.views.total_sales import render as render_total_sales
 
@@ -51,6 +54,14 @@ def _run_instructors() -> None:
     )
 
 
+def _run_peak_times() -> None:
+    render_peak_times(
+        st.session_state["dash_raw"],
+        st.session_state["dash_start"],
+        st.session_state["dash_end"],
+    )
+
+
 def main() -> None:
     st.set_page_config(
         page_title="SOMA Studios — Analytics",
@@ -64,13 +75,16 @@ def main() -> None:
 
     sidebar_header()
 
-    raw = load_sales_or_error()
-    if raw is None or raw.empty:
-        if raw is not None:
+    raw_full = load_sales_or_error()
+    if raw_full is None or raw_full.empty:
+        if raw_full is not None:
             st.warning("No sales data found in momence_total_sales.")
         return
 
+    operating = sidebar_operating_view()
+    raw = prepare_sales_data(raw_full, operating)
     start, end = sidebar_date_range(raw)
+
     st.session_state["dash_raw"] = raw
     st.session_state["dash_start"] = start
     st.session_state["dash_end"] = end
@@ -102,6 +116,12 @@ def main() -> None:
                 title="Instructor Performance",
                 icon="🧘",
                 url_path="instructor-performance",
+            ),
+            st.Page(
+                _run_peak_times,
+                title="Peak Times",
+                icon="🕐",
+                url_path="peak-times",
             ),
         ],
     )
