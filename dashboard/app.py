@@ -73,6 +73,9 @@ def _metric_row(
     c4.metric("Days with sales", f"{len(daily):,}", help=f"Out of {calendar_days} days in range")
 
 
+DAY_MS = 24 * 60 * 60 * 1000
+
+
 def _daily_chart(daily: pd.DataFrame) -> None:
     fig = go.Figure()
     fig.add_trace(
@@ -81,7 +84,7 @@ def _daily_chart(daily: pd.DataFrame) -> None:
             y=daily["net_sales"],
             name="Daily net sales",
             marker_color="#2d6a4f",
-            width=0.85,
+            width=DAY_MS * 0.92,
         )
     )
     fig.update_layout(
@@ -92,6 +95,7 @@ def _daily_chart(daily: pd.DataFrame) -> None:
         margin=dict(l=48, r=24, t=56, b=48),
         hovermode="x unified",
         autosize=True,
+        bargap=0.06,
     )
     fig.update_yaxes(tickformat=",.0f")
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
