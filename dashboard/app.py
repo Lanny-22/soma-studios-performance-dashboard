@@ -112,7 +112,12 @@ def main() -> None:
         st.session_state.authenticated = False
         st.rerun()
 
-    raw = _cached_sales()
+    try:
+        raw = _cached_sales()
+    except Exception as exc:
+        st.error("Could not connect to Supabase. Check DATABASE_URL in Streamlit secrets.")
+        st.caption(f"Details: {exc}")
+        return
     if raw.empty:
         st.warning("No sales data found in momence_total_sales.")
         return

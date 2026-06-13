@@ -3,34 +3,35 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Generator, Optional
 
-from psycopg import Connection
+from psycopg import Connection, connect
 from psycopg.rows import dict_row
-from psycopg_pool import ConnectionPool
 
 from src.config import get_settings
 
-_pool: Optional[ConnectionPool] = None
 
-
-def get_pool() -> ConnectionPool:
-    global _pool
-    if _pool is None:
-        url = get_settings().database_url
-        if not url:
-            raise ValueError("DATABASE_URL is not set — add it to .env before running sync jobs")
-        _pool = ConnectionPool(
-            conninfo=url,
-            min_size=1,
-            max_size=5,
-            kwargs={"row_factory": dict_row, "prepare_threshold": None},
-        )
-    return _pool
+def _conninfo() -> str:
+    url = get_settings().database_url
+    if not url:
+        raise ValueError("DATABASE_URL is not set — add it to .env before running sync jobs")
+    if "sslmode=" not in url:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}sslmode=require"
+    return url
 
 
 @contextmanager
 def get_conn() -> Generator[Connection, None, None]:
-    with get_pool().connection() as conn:
+    """Open one connection per use — reliable on Streamlit Cloud (no pool timeouts)."""
+    conn = connect(
+        _conninfo(),
+        row_factory=dict_row,
+        prepare_threshold=None,
+        connect_timeout=20,
+    )
+    try:
         yield conn
+    finally:
+        conn.close()
 
 
 def start_sync_run(source: str) -> int:
