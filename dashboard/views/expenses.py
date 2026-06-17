@@ -110,24 +110,68 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
         )
         st.dataframe(display, use_container_width=True, hide_index=True)
 
-    with st.expander("Transaction detail"):
-        detail = filtered.sort_values("completed_at", ascending=False).copy()
-        detail["completed_at"] = detail["completed_at"].dt.tz_convert("Europe/Malta").dt.strftime(
-            "%Y-%m-%d %H:%M"
-        )
-        detail["spend"] = detail["spend"].map(lambda v: EUR.format(v))
-        detail = detail.rename(
-            columns={
-                "completed_at": "Completed",
-                "label": "Label",
-                "description": "Description",
-                "type": "Type",
-                "product": "Account",
-                "spend": "Spend",
-            }
-        )
-        st.dataframe(
-            detail[["Completed", "Label", "Description", "Type", "Account", "Spend"]],
-            use_container_width=True,
-            hide_index=True,
-        )
+    st.subheader("Transactions by label")
+    label_options = by_label["label"].tolist()
+    label_totals = by_label.set_index("label")
+
+    selected_label = st.selectbox(
+        "Select label",
+        options=label_options,
+        format_func=lambda lbl: (
+            f"{lbl} — {EUR.format(label_totals.loc[lbl, 'total_spend'])} "
+            f"({int(label_totals.loc[lbl, 'transaction_count'])} transactions)"
+        ),
+    )
+
+    label_rows = filtered[filtered["label"] == selected_label].sort_values(
+        "completed_at", ascending=False
+    )
+    label_spend = label_rows["spend"].sum()
+    label_count = len(label_rows)
+
+    c1, c2 = st.columns(2)
+    c1.metric("Label spend", EUR.format(label_spend))
+    c2.metric("Transactions", f"{label_count:,}")
+
+    detail = label_rows.copy()
+    detail["completed_at"] = detail["completed_at"].dt.tz_convert("Europe/Malta").dt.strftime(
+        "%Y-%m-%d %H:%M"
+    )
+    detail["amount"] = detail["amount"].map(lambda v: EUR.format(v))
+    detail["fee"] = detail["fee"].map(lambda v: EUR.format(v))
+    detail["spend"] = detail["spend"].map(lambda v: EUR.format(v))
+    if "notes" in detail.columns:
+        detail["notes"] = detail["notes"].fillna("")
+
+    columns = ["completed_at", "description", "type", "product", "amount", "fee", "spend", "currency"]
+    if "notes" in detail.columns:
+        columns.append("notes")
+
+    detail = detail.rename(
+        columns={
+            "completed_at": "Completed",
+            "description": "Description",
+            "type": "Type",
+            "product": "Account",
+            "amount": "Amount",
+            "fee": "Fee",
+            "spend": "Spend",
+            "currency": "Currency",
+            "notes": "Notes",
+        }
+    )
+    st.dataframe(
+        detail[[
+            "Completed",
+            "Description",
+            "Type",
+            "Account",
+            "Amount",
+            "Fee",
+            "Spend",
+            "Currency",
+            *(["Notes"] if "Notes" in detail.columns else []),
+        ]],
+        use_container_width=True,
+        hide_index=True,
+    )

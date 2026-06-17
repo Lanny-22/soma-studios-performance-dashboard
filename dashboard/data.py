@@ -304,7 +304,8 @@ EXPENSES_QUERY = """
         fee,
         currency,
         type,
-        product
+        product,
+        notes
     FROM revolut_expenses
     WHERE completed_at IS NOT NULL
     ORDER BY completed_at
