@@ -305,16 +305,34 @@ EXPENSES_QUERY = """
         currency,
         type,
         product,
-        notes
+        notes,
+        manually_excluded
+    FROM revolut_expenses
+    WHERE completed_at IS NOT NULL
+      AND COALESCE(manually_excluded, FALSE) = FALSE
+    ORDER BY completed_at
+"""
+
+EXPENSES_ALL_QUERY = """
+    SELECT
+        id,
+        completed_at,
+        label,
+        description,
+        amount,
+        fee,
+        currency,
+        type,
+        product,
+        notes,
+        manually_excluded
     FROM revolut_expenses
     WHERE completed_at IS NOT NULL
     ORDER BY completed_at
 """
 
 
-def load_revolut_expenses() -> pd.DataFrame:
-    with get_conn() as conn:
-        rows = conn.execute(EXPENSES_QUERY).fetchall()
+def _prepare_expenses_df(rows: list) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
 
@@ -326,7 +344,24 @@ def load_revolut_expenses() -> pd.DataFrame:
     df["fee"] = pd.to_numeric(df["fee"], errors="coerce").fillna(0)
     df["spend"] = df["amount"].abs()
     df["label"] = df["label"].fillna("Unknown")
+    df["manually_excluded"] = df["manually_excluded"].fillna(False).astype(bool)
     return df
+
+
+def load_revolut_expenses(include_excluded: bool = False) -> pd.DataFrame:
+    query = EXPENSES_ALL_QUERY if include_excluded else EXPENSES_QUERY
+    with get_conn() as conn:
+        rows = conn.execute(query).fetchall()
+    return _prepare_expenses_df(rows)
+
+
+def set_expense_manually_excluded(expense_id: str, excluded: bool) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE revolut_expenses SET manually_excluded = %s WHERE id = %s",
+            (excluded, expense_id),
+        )
+        conn.commit()
 
 
 def filter_expense_date_range(df: pd.DataFrame, start: date, end: date) -> pd.DataFrame:

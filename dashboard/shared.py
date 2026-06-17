@@ -93,7 +93,17 @@ def cached_sales() -> pd.DataFrame:
 
 @st.cache_data(ttl=300, show_spinner="Loading expense data from Supabase…")
 def cached_expenses() -> pd.DataFrame:
-    return load_revolut_expenses()
+    return load_revolut_expenses(include_excluded=False)
+
+
+@st.cache_data(ttl=300, show_spinner="Loading all expense rows…")
+def cached_all_expenses() -> pd.DataFrame:
+    return load_revolut_expenses(include_excluded=True)
+
+
+def clear_expense_cache() -> None:
+    cached_expenses.clear()
+    cached_all_expenses.clear()
 
 
 def load_instructor_or_error() -> pd.DataFrame | None:

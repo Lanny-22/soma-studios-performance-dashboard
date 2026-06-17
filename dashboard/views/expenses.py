@@ -7,8 +7,20 @@ import plotly.graph_objects as go
 import pandas as pd
 import streamlit as st
 
-from dashboard.data import expense_totals_by_label, filter_expense_date_range
-from dashboard.shared import BAR_CHART_HEIGHT, BLACK, EUR, GREEN, PLOTLY_CONFIG
+from dashboard.data import (
+    expense_totals_by_label,
+    filter_expense_date_range,
+    set_expense_manually_excluded,
+)
+from dashboard.shared import (
+    BAR_CHART_HEIGHT,
+    BLACK,
+    EUR,
+    GREEN,
+    PLOTLY_CONFIG,
+    cached_all_expenses,
+    clear_expense_cache,
+)
 
 SELECTED_LABEL_KEY = "expense_selected_label"
 
@@ -39,6 +51,18 @@ def _label_from_selection(event: Any) -> str | None:
 def _store_label_selection(label: str | None, valid_labels: set[str]) -> None:
     if label and label in valid_labels:
         st.session_state[SELECTED_LABEL_KEY] = label
+
+
+def _sort_label_rows(label_rows: pd.DataFrame, sort_choice: str) -> pd.DataFrame:
+    if sort_choice.startswith("Date"):
+        return label_rows.sort_values(
+            "completed_at",
+            ascending=sort_choice == "Date (oldest first)",
+        )
+    return label_rows.sort_values(
+        "spend",
+        ascending=sort_choice == "Amount (lowest spend)",
+    )
 
 
 def _horizontal_bars(
@@ -102,20 +126,26 @@ def _horizontal_bars(
     _store_label_selection(label, valid_labels)
 
 
-def _transaction_table(label_rows: pd.DataFrame) -> None:
-    detail = label_rows.copy()
-    detail["completed_at"] = detail["completed_at"].dt.tz_convert("Europe/Malta").dt.strftime(
+def _transaction_editor(label_rows: pd.DataFrame, selected_label: str, show_excluded: bool) -> None:
+    visible = label_rows if show_excluded else label_rows[~label_rows["manually_excluded"]]
+    if visible.empty:
+        st.info(
+            "No transactions in this view. Enable **Show excluded transactions** to restore excluded rows."
+        )
+        return
+
+    editor_df = visible.copy()
+    editor_df["Completed"] = editor_df["completed_at"].dt.tz_convert("Europe/Malta").dt.strftime(
         "%Y-%m-%d %H:%M"
     )
-    detail["amount"] = detail["amount"].map(lambda v: EUR.format(v))
-    detail["fee"] = detail["fee"].map(lambda v: EUR.format(v))
-    detail["spend"] = detail["spend"].map(lambda v: EUR.format(v))
-    if "notes" in detail.columns:
-        detail["notes"] = detail["notes"].fillna("")
+    editor_df["Exclude"] = editor_df["manually_excluded"]
+    if "notes" in editor_df.columns:
+        editor_df["Notes"] = editor_df["notes"].fillna("")
+    else:
+        editor_df["Notes"] = ""
 
-    detail = detail.rename(
+    editor_df = editor_df.rename(
         columns={
-            "completed_at": "Completed",
             "description": "Description",
             "type": "Type",
             "product": "Account",
@@ -123,26 +153,64 @@ def _transaction_table(label_rows: pd.DataFrame) -> None:
             "fee": "Fee",
             "spend": "Spend",
             "currency": "Currency",
-            "notes": "Notes",
         }
     )
-    st.dataframe(
-        detail[
-            [
-                "Completed",
-                "Description",
-                "Type",
-                "Account",
-                "Amount",
-                "Fee",
-                "Spend",
-                "Currency",
-                *(["Notes"] if "Notes" in detail.columns else []),
-            ]
+
+    table_cols = [
+        "id",
+        "Exclude",
+        "Completed",
+        "Description",
+        "Type",
+        "Account",
+        "Amount",
+        "Fee",
+        "Spend",
+        "Currency",
+        "Notes",
+    ]
+    before_exclude = dict(zip(editor_df["id"], editor_df["Exclude"]))
+
+    edited = st.data_editor(
+        editor_df[table_cols],
+        column_config={
+            "id": None,
+            "Exclude": st.column_config.CheckboxColumn(
+                "Exclude",
+                help="Excluded transactions are removed from totals and charts.",
+                default=False,
+            ),
+            "Amount": st.column_config.NumberColumn(format="€%.2f"),
+            "Fee": st.column_config.NumberColumn(format="€%.2f"),
+            "Spend": st.column_config.NumberColumn(format="€%.2f"),
+        },
+        disabled=[
+            "Completed",
+            "Description",
+            "Type",
+            "Account",
+            "Amount",
+            "Fee",
+            "Spend",
+            "Currency",
+            "Notes",
         ],
-        use_container_width=True,
         hide_index=True,
+        use_container_width=True,
+        key=f"expense_tx_editor_{selected_label}_{show_excluded}",
     )
+
+    changed = False
+    for _, row in edited.iterrows():
+        expense_id = row["id"]
+        excluded = bool(row["Exclude"])
+        if excluded != before_exclude.get(expense_id, False):
+            set_expense_manually_excluded(expense_id, excluded)
+            changed = True
+
+    if changed:
+        clear_expense_cache()
+        st.rerun()
 
 
 def render(raw: pd.DataFrame, start: date, end: date) -> None:
@@ -150,7 +218,8 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
     st.caption(
         "Spend from Revolut Business (`revolut_expenses`) — rows labelled in Revolut "
         "excluding `NOT_EXPENSE`. Filtered by transaction completed date (Malta time). "
-        "Click a label in the chart to see its transactions."
+        "Click a label in the chart to see its transactions. Toggle **Exclude** to hide "
+        "individual rows from totals."
     )
 
     if raw is None or raw.empty:
@@ -234,14 +303,14 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
         st.info("Click a label bar in the chart above (or a row in the summary table) to list its transactions.")
         return
 
-    label_rows = filtered[filtered["label"] == selected_label].copy()
-    label_spend = label_rows["spend"].sum()
-    label_count = len(label_rows)
+    all_filtered = filter_expense_date_range(cached_all_expenses(), start, end)
+    label_all = all_filtered[all_filtered["label"] == selected_label].copy()
+    active_rows = label_all[~label_all["manually_excluded"]]
 
     st.markdown(f"**{selected_label}**")
     c1, c2 = st.columns(2)
-    c1.metric("Label spend (in range)", EUR.format(label_spend))
-    c2.metric("Transactions", f"{label_count:,}")
+    c1.metric("Label spend (in range)", EUR.format(active_rows["spend"].sum()))
+    c2.metric("Transactions", f"{len(active_rows):,}")
 
     sort_choice = st.radio(
         "Sort transactions",
@@ -254,15 +323,11 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
         horizontal=True,
         key="expense_label_sort",
     )
-    if sort_choice.startswith("Date"):
-        label_rows = label_rows.sort_values(
-            "completed_at",
-            ascending=sort_choice == "Date (oldest first)",
-        )
-    else:
-        label_rows = label_rows.sort_values(
-            "spend",
-            ascending=sort_choice == "Amount (lowest spend)",
-        )
+    show_excluded = st.checkbox(
+        "Show excluded transactions",
+        value=False,
+        help="Turn on to see excluded rows and clear the Exclude toggle to bring them back.",
+    )
 
-    _transaction_table(label_rows)
+    label_all = _sort_label_rows(label_all, sort_choice)
+    _transaction_editor(label_all, selected_label, show_excluded)
