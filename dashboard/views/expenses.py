@@ -234,9 +234,7 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
         st.info("Click a label bar in the chart above (or a row in the summary table) to list its transactions.")
         return
 
-    label_rows = filtered[filtered["label"] == selected_label].sort_values(
-        "completed_at", ascending=False
-    )
+    label_rows = filtered[filtered["label"] == selected_label].copy()
     label_spend = label_rows["spend"].sum()
     label_count = len(label_rows)
 
@@ -244,5 +242,27 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
     c1, c2 = st.columns(2)
     c1.metric("Label spend (in range)", EUR.format(label_spend))
     c2.metric("Transactions", f"{label_count:,}")
+
+    sort_choice = st.radio(
+        "Sort transactions",
+        [
+            "Date (newest first)",
+            "Date (oldest first)",
+            "Amount (highest spend)",
+            "Amount (lowest spend)",
+        ],
+        horizontal=True,
+        key="expense_label_sort",
+    )
+    if sort_choice.startswith("Date"):
+        label_rows = label_rows.sort_values(
+            "completed_at",
+            ascending=sort_choice == "Date (oldest first)",
+        )
+    else:
+        label_rows = label_rows.sort_values(
+            "spend",
+            ascending=sort_choice == "Amount (lowest spend)",
+        )
 
     _transaction_table(label_rows)
