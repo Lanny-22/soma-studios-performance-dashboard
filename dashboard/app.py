@@ -10,6 +10,7 @@ from dashboard.shared import (
     sidebar_date_range,
     sidebar_header,
 )
+from dashboard.views.downloads import render as render_downloads
 from dashboard.views.expenses import render as render_expenses
 from dashboard.views.instructors import render as render_instructors
 from dashboard.views.packages import render as render_packages
@@ -71,6 +72,14 @@ def _run_expenses() -> None:
         raw,
         st.session_state["dash_start"],
         st.session_state["dash_end"],
+    )
+
+
+def _run_downloads() -> None:
+    render_downloads(
+        st.session_state.get("dash_raw"),
+        st.session_state.get("dash_expense_raw"),
+        st.session_state.get("dash_instructor_raw"),
     )
 
 
@@ -139,6 +148,12 @@ def main() -> None:
                 title="Expense Tracking",
                 icon="💳",
                 url_path="expense-tracking",
+            ),
+            st.Page(
+                _run_downloads,
+                title="Downloads",
+                icon="📥",
+                url_path="downloads",
             ),
         ],
     )

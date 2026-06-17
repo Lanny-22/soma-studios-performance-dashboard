@@ -380,3 +380,186 @@ def expense_totals_by_label(df: pd.DataFrame) -> pd.DataFrame:
         .sort_values("total_spend", ascending=False)
     )
     return totals
+
+
+TOTAL_SALES_EXPORT_QUERY = """
+    SELECT
+        sale_reference,
+        category,
+        item,
+        payment_at,
+        service_at,
+        sale_value,
+        tax,
+        refunded,
+        payment_method,
+        payment_status,
+        sold_by,
+        paying_customer_email,
+        paying_customer_name,
+        customer_email,
+        customer_name,
+        location,
+        note
+    FROM momence_total_sales
+    WHERE payment_at IS NOT NULL
+    ORDER BY payment_at
+"""
+
+DOWNLOAD_DATASETS: dict[str, dict[str, str]] = {
+    "total_sales": {
+        "label": "Total Sales (Momence)",
+        "description": "Momence total sales report — filtered by payment date (Malta time).",
+        "file_prefix": "soma_total_sales",
+    },
+    "expenses": {
+        "label": "Expenses (Revolut)",
+        "description": "Revolut expense rows — filtered by completed date (Malta time). Includes manually excluded flag.",
+        "file_prefix": "soma_expenses",
+    },
+    "instructor_performance": {
+        "label": "Instructor Performance",
+        "description": "Momence instructor monthly reports overlapping the selected date range.",
+        "file_prefix": "soma_instructor_performance",
+    },
+}
+
+
+def load_total_sales_export() -> pd.DataFrame:
+    with get_conn() as conn:
+        rows = conn.execute(TOTAL_SALES_EXPORT_QUERY).fetchall()
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    df["payment_at"] = pd.to_datetime(df["payment_at"], utc=True)
+    df["service_at"] = pd.to_datetime(df["service_at"], utc=True, errors="coerce")
+    payment_local = df["payment_at"].dt.tz_convert(STUDIO_TIMEZONE)
+    df["payment_date"] = payment_local.dt.date
+    if df["service_at"].notna().any():
+        service_local = df["service_at"].dt.tz_convert(STUDIO_TIMEZONE)
+        df["service_date"] = service_local.dt.date
+    else:
+        df["service_date"] = None
+    df["sale_value"] = pd.to_numeric(df["sale_value"], errors="coerce").fillna(0)
+    df["tax"] = pd.to_numeric(df["tax"], errors="coerce").fillna(0)
+    df["refunded"] = pd.to_numeric(df["refunded"], errors="coerce").fillna(0)
+    df["net_sales"] = df["sale_value"] - df["refunded"]
+    return df
+
+
+def filter_sales_payment_date_range(df: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
+    if df.empty:
+        return df
+    return df[(df["payment_date"] >= start) & (df["payment_date"] <= end)].copy()
+
+
+def combined_download_date_bounds(
+    sales: pd.DataFrame | None = None,
+    expenses: pd.DataFrame | None = None,
+    instructors: pd.DataFrame | None = None,
+) -> tuple[date, date]:
+    bounds: list[date] = []
+    if sales is not None and not sales.empty and "payment_date" in sales.columns:
+        bounds.extend([sales["payment_date"].min(), sales["payment_date"].max()])
+    if expenses is not None and not expenses.empty:
+        bounds.extend([expenses["expense_date"].min(), expenses["expense_date"].max()])
+    if instructors is not None and not instructors.empty:
+        bounds.extend([instructors["report_month"].min(), instructors["report_month"].max()])
+    if not bounds:
+        today = date.today()
+        return today, today
+    return min(bounds), max(bounds)
+
+
+def _format_datetimes_for_csv(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    out = df.copy()
+    for col in columns:
+        if col not in out.columns:
+            continue
+        series = pd.to_datetime(out[col], utc=True, errors="coerce")
+        out[col] = series.dt.tz_convert(STUDIO_TIMEZONE).dt.strftime("%Y-%m-%d %H:%M")
+    return out
+
+
+def build_download_export(
+    dataset_key: str,
+    start: date,
+    end: date,
+    sales_export: pd.DataFrame | None = None,
+    expenses_all: pd.DataFrame | None = None,
+    instructors: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    if dataset_key == "total_sales":
+        if sales_export is None or sales_export.empty:
+            return pd.DataFrame()
+        filtered = filter_sales_payment_date_range(sales_export, start, end)
+        filtered = _format_datetimes_for_csv(filtered, ["payment_at", "service_at"])
+        return filtered[
+            [
+                "sale_reference",
+                "category",
+                "item",
+                "payment_at",
+                "payment_date",
+                "service_at",
+                "service_date",
+                "sale_value",
+                "tax",
+                "refunded",
+                "net_sales",
+                "payment_method",
+                "payment_status",
+                "sold_by",
+                "paying_customer_email",
+                "paying_customer_name",
+                "customer_email",
+                "customer_name",
+                "location",
+                "note",
+            ]
+        ]
+
+    if dataset_key == "expenses":
+        if expenses_all is None or expenses_all.empty:
+            return pd.DataFrame()
+        filtered = filter_expense_date_range(expenses_all, start, end)
+        filtered = _format_datetimes_for_csv(filtered, ["completed_at"])
+        return filtered[
+            [
+                "id",
+                "completed_at",
+                "expense_date",
+                "label",
+                "description",
+                "type",
+                "product",
+                "amount",
+                "fee",
+                "spend",
+                "currency",
+                "notes",
+                "manually_excluded",
+            ]
+        ]
+
+    if dataset_key == "instructor_performance":
+        if instructors is None or instructors.empty:
+            return pd.DataFrame()
+        filtered = filter_instructor_performance(instructors, start, end)
+        return filtered[
+            [
+                "report_month",
+                "instructor_name",
+                "instructor_email",
+                "average_attendance",
+                "total_bookings",
+                "gross_revenue",
+                "instructor_payout",
+                "studio_net",
+                "class_count",
+                "total_hours",
+            ]
+        ].sort_values(["report_month", "instructor_name"])
+
+    return pd.DataFrame()
