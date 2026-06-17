@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from dashboard.data import load_instructor_performance, load_total_sales
+from dashboard.data import load_instructor_performance, load_revolut_expenses, load_total_sales
 from src.config import get_settings
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -91,6 +91,11 @@ def cached_sales() -> pd.DataFrame:
     return load_total_sales()
 
 
+@st.cache_data(ttl=300, show_spinner="Loading expense data from Supabase…")
+def cached_expenses() -> pd.DataFrame:
+    return load_revolut_expenses()
+
+
 def load_instructor_or_error() -> pd.DataFrame | None:
     try:
         return cached_instructor_performance()
@@ -120,12 +125,39 @@ def load_sales_or_error() -> pd.DataFrame | None:
         return None
 
 
-def date_bounds(raw: pd.DataFrame) -> tuple[date, date]:
-    return raw["sale_date"].min(), raw["sale_date"].max()
+def load_expenses_or_error() -> pd.DataFrame | None:
+    try:
+        return cached_expenses()
+    except Exception as exc:
+        err = str(exc)
+        st.error("Could not load Revolut expense data.")
+        with st.expander("Technical details"):
+            st.code(err)
+        return None
 
 
-def sidebar_date_range(raw: pd.DataFrame, header: str = "Filters") -> tuple[date, date]:
-    min_date, max_date = date_bounds(raw)
+def date_bounds(raw: pd.DataFrame, date_col: str = "sale_date") -> tuple[date, date]:
+    return raw[date_col].min(), raw[date_col].max()
+
+
+def combined_date_bounds(
+    sales: pd.DataFrame,
+    expenses: pd.DataFrame | None = None,
+) -> tuple[date, date]:
+    min_date, max_date = date_bounds(sales)
+    if expenses is not None and not expenses.empty:
+        exp_min, exp_max = date_bounds(expenses, "expense_date")
+        min_date = min(min_date, exp_min)
+        max_date = max(max_date, exp_max)
+    return min_date, max_date
+
+
+def sidebar_date_range(
+    raw: pd.DataFrame,
+    header: str = "Filters",
+    expenses: pd.DataFrame | None = None,
+) -> tuple[date, date]:
+    min_date, max_date = combined_date_bounds(raw, expenses)
     st.sidebar.header(header)
     start, end = st.sidebar.date_input(
         "Date range",

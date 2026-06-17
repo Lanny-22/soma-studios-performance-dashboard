@@ -292,3 +292,55 @@ def instructor_month_comparison(df: pd.DataFrame, start: date, end: date) -> pd.
     if sort_col and sort_col in wide.columns:
         wide = wide.sort_values(sort_col, ascending=False, na_position="last")
     return wide
+
+
+EXPENSES_QUERY = """
+    SELECT
+        id,
+        completed_at,
+        label,
+        description,
+        amount,
+        fee,
+        currency,
+        type,
+        product
+    FROM revolut_expenses
+    WHERE completed_at IS NOT NULL
+    ORDER BY completed_at
+"""
+
+
+def load_revolut_expenses() -> pd.DataFrame:
+    with get_conn() as conn:
+        rows = conn.execute(EXPENSES_QUERY).fetchall()
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    df["completed_at"] = pd.to_datetime(df["completed_at"], utc=True)
+    completed_local = df["completed_at"].dt.tz_convert(STUDIO_TIMEZONE)
+    df["expense_date"] = completed_local.dt.date
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
+    df["fee"] = pd.to_numeric(df["fee"], errors="coerce").fillna(0)
+    df["spend"] = df["amount"].abs()
+    df["label"] = df["label"].fillna("Unknown")
+    return df
+
+
+def filter_expense_date_range(df: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
+    if df.empty:
+        return df
+    return df[(df["expense_date"] >= start) & (df["expense_date"] <= end)].copy()
+
+
+def expense_totals_by_label(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=["label", "transaction_count", "total_spend"])
+
+    totals = (
+        df.groupby("label", as_index=False)
+        .agg(transaction_count=("id", "count"), total_spend=("spend", "sum"))
+        .sort_values("total_spend", ascending=False)
+    )
+    return totals

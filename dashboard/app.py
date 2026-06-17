@@ -9,6 +9,7 @@ from dashboard.shared import (
     sidebar_date_range,
     sidebar_header,
 )
+from dashboard.views.expenses import render as render_expenses
 from dashboard.views.instructors import render as render_instructors
 from dashboard.views.packages import render as render_packages
 from dashboard.views.peak_times import render as render_peak_times
@@ -60,6 +61,18 @@ def _run_peak_times() -> None:
     )
 
 
+def _run_expenses() -> None:
+    raw = st.session_state.get("dash_expense_raw")
+    if raw is None or raw.empty:
+        st.warning("No expense data found.")
+        return
+    render_expenses(
+        raw,
+        st.session_state["dash_start"],
+        st.session_state["dash_end"],
+    )
+
+
 def main() -> None:
     st.set_page_config(
         page_title="SOMA Studios — Analytics",
@@ -79,11 +92,13 @@ def main() -> None:
             st.warning("No sales data found in momence_total_sales.")
         return
 
-    start, end = sidebar_date_range(raw)
+    expenses = load_expenses_or_error()
+    start, end = sidebar_date_range(raw, expenses=expenses)
     st.session_state["dash_raw"] = raw
     st.session_state["dash_start"] = start
     st.session_state["dash_end"] = end
     st.session_state["dash_instructor_raw"] = load_instructor_or_error()
+    st.session_state["dash_expense_raw"] = expenses
 
     nav = st.navigation(
         [
@@ -117,6 +132,12 @@ def main() -> None:
                 title="Peak Times",
                 icon="🕐",
                 url_path="peak-times",
+            ),
+            st.Page(
+                _run_expenses,
+                title="Expense Tracking",
+                icon="💳",
+                url_path="expense-tracking",
             ),
         ],
     )

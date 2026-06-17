@@ -120,7 +120,8 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
 
     with tab_rpc:
         st.markdown(
-            "**Top instructors by net revenue per class** (studio net ÷ classes taught)."
+            "**Top instructors by net revenue per class** "
+            "(studio net ÷ classes taught)."
         )
         _horizontal_bars(
             by_net_revenue_per_class.head(12),
