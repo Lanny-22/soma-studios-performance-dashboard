@@ -3,6 +3,7 @@
 import streamlit as st
 
 from dashboard.shared import (
+    load_expenses_or_error,
     load_instructor_or_error,
     load_sales_or_error,
     password_gate,
