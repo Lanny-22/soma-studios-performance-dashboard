@@ -20,6 +20,8 @@ def _load_streamlit_secrets() -> None:
                 "DASHBOARD_PASSWORD",
                 "LOGO_URL",
                 "DOWNLOAD_ALERT_EMAIL",
+                "RESEND_API_KEY",
+                "RESEND_FROM",
                 "SMTP_HOST",
                 "SMTP_PORT",
                 "SMTP_USER",

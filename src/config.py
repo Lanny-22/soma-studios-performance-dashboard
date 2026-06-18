@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     revolut_initial_lookback_days: int = 365
 
     download_alert_email: str = "info@somastudiosmt.net"
+    resend_api_key: str = ""
+    resend_from: str = "SOMA Analytics <onboarding@resend.dev>"
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
