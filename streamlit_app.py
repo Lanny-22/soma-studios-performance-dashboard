@@ -15,7 +15,18 @@ def _load_streamlit_secrets() -> None:
         import streamlit as st
 
         if hasattr(st, "secrets"):
-            for key in ("DATABASE_URL", "DASHBOARD_PASSWORD", "LOGO_URL"):
+            for key in (
+                "DATABASE_URL",
+                "DASHBOARD_PASSWORD",
+                "LOGO_URL",
+                "DOWNLOAD_ALERT_EMAIL",
+                "SMTP_HOST",
+                "SMTP_PORT",
+                "SMTP_USER",
+                "SMTP_PASSWORD",
+                "SMTP_FROM",
+                "SMTP_USE_TLS",
+            ):
                 if key not in os.environ and key in st.secrets:
                     os.environ[key] = str(st.secrets[key])
     except Exception:

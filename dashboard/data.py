@@ -1,11 +1,15 @@
 """Load Momence sales data from Supabase for the analytics dashboard."""
 
 import calendar
-from datetime import date
+import logging
+from datetime import date, datetime, timezone
 
 import pandas as pd
 
 from src.db import get_conn
+from src.download_notify import send_download_alert_email
+
+logger = logging.getLogger(__name__)
 
 STUDIO_TIMEZONE = "Europe/Malta"
 DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
@@ -599,10 +603,12 @@ def log_download_event(
     first_name: str | None = None,
     last_name: str | None = None,
 ) -> None:
+    downloaded_at = datetime.now(timezone.utc)
     with get_conn() as conn:
         conn.execute(
             """
             INSERT INTO download_log (
+                downloaded_at,
                 ip_address,
                 user_agent,
                 first_name,
@@ -613,9 +619,10 @@ def log_download_event(
                 date_range_start,
                 date_range_end,
                 row_count
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
+                downloaded_at,
                 ip_address,
                 user_agent,
                 (first_name or "").strip() or None,
@@ -629,3 +636,18 @@ def log_download_event(
             ),
         )
         conn.commit()
+
+    try:
+        send_download_alert_email(
+            dataset_label=dataset_label,
+            file_name=file_name,
+            date_range_start=str(date_range_start),
+            date_range_end=str(date_range_end),
+            row_count=row_count,
+            ip_address=ip_address,
+            first_name=first_name,
+            last_name=last_name,
+            downloaded_at=downloaded_at.strftime("%Y-%m-%d %H:%M UTC"),
+        )
+    except Exception as exc:
+        logger.warning("Download alert email failed: %s", exc)

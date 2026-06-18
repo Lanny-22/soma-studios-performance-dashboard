@@ -130,19 +130,22 @@ def render(
 
         file_name = _download_filename(meta["file_prefix"], start, end)
         csv_bytes = export_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
+        clicked = st.download_button(
             label=f"Download {meta['label']} CSV",
             data=csv_bytes,
             file_name=file_name,
             mime="text/csv",
             key=f"download_btn_{dataset_key}",
-            on_click=_record_download,
-            kwargs={
-                "dataset_key": dataset_key,
-                "dataset_label": meta["label"],
-                "file_name": file_name,
-                "range_start": start.isoformat(),
-                "range_end": end.isoformat(),
-                "row_count": len(export_df),
-            },
         )
+        if clicked:
+            try:
+                _record_download(
+                    dataset_key=dataset_key,
+                    dataset_label=meta["label"],
+                    file_name=file_name,
+                    range_start=start.isoformat(),
+                    range_end=end.isoformat(),
+                    row_count=len(export_df),
+                )
+            except Exception as exc:
+                st.error(f"Download started but logging failed: {exc}")
