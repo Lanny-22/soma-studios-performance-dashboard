@@ -27,10 +27,10 @@ def _record_download(
     range_start: str,
     range_end: str,
     row_count: int,
-) -> None:
+) -> str | None:
     meta = client_request_meta()
     first_name, last_name = download_user_names()
-    log_download_event(
+    return log_download_event(
         dataset_key=dataset_key,
         dataset_label=dataset_label,
         file_name=file_name,
@@ -139,7 +139,7 @@ def render(
         )
         if clicked:
             try:
-                _record_download(
+                email_error = _record_download(
                     dataset_key=dataset_key,
                     dataset_label=meta["label"],
                     file_name=file_name,
@@ -147,5 +147,17 @@ def render(
                     range_end=end.isoformat(),
                     row_count=len(export_df),
                 )
+                if email_error:
+                    st.warning(
+                        "Download logged, but the alert email did not send. "
+                        f"{email_error}"
+                    )
+                    if "403" in email_error or "verify a domain" in email_error.lower():
+                        st.info(
+                            "Resend requires **somastudiosmt.net** to be verified before "
+                            "sending to info@somastudiosmt.net. Add the domain at "
+                            "[resend.com/domains](https://resend.com/domains), then set "
+                            "`RESEND_FROM = \"SOMA Analytics <info@somastudiosmt.net>\"`."
+                        )
             except Exception as exc:
                 st.error(f"Download started but logging failed: {exc}")

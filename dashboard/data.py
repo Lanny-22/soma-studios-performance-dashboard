@@ -602,7 +602,8 @@ def log_download_event(
     user_agent: str | None = None,
     first_name: str | None = None,
     last_name: str | None = None,
-) -> None:
+) -> str | None:
+    """Insert audit row. Returns an email error message, or None if alert sent/skipped cleanly."""
     downloaded_at = datetime.now(timezone.utc)
     with get_conn() as conn:
         conn.execute(
@@ -651,3 +652,5 @@ def log_download_event(
         )
     except Exception as exc:
         logger.warning("Download alert email failed: %s", exc)
+        return str(exc)
+    return None

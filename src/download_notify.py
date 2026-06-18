@@ -153,3 +153,6 @@ def send_download_alert_email(
         return
 
     logger.info("Download alert email skipped — set RESEND_API_KEY or SMTP credentials")
+    raise RuntimeError(
+        "Email alerts are not configured. Add RESEND_API_KEY (or SMTP credentials) to Streamlit secrets."
+    )
