@@ -1,5 +1,8 @@
 """Email alerts for dashboard download audit events."""
 
+# NOTE: Download alert emails are currently disabled in the dashboard;
+# this module is kept for a future re-enable. log_download_event only writes to download_log.
+
 from __future__ import annotations
 
 import json

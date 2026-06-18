@@ -7,8 +7,6 @@ from datetime import date, datetime, timezone
 import pandas as pd
 
 from src.db import get_conn
-from src.download_notify import send_download_alert_email
-
 logger = logging.getLogger(__name__)
 
 STUDIO_TIMEZONE = "Europe/Malta"
@@ -602,8 +600,8 @@ def log_download_event(
     user_agent: str | None = None,
     first_name: str | None = None,
     last_name: str | None = None,
-) -> str | None:
-    """Insert audit row. Returns an email error message, or None if alert sent/skipped cleanly."""
+) -> None:
+    """Insert audit row into download_log. Email alerts are disabled (deferred)."""
     downloaded_at = datetime.now(timezone.utc)
     with get_conn() as conn:
         conn.execute(
@@ -638,19 +636,4 @@ def log_download_event(
         )
         conn.commit()
 
-    try:
-        send_download_alert_email(
-            dataset_label=dataset_label,
-            file_name=file_name,
-            date_range_start=str(date_range_start),
-            date_range_end=str(date_range_end),
-            row_count=row_count,
-            ip_address=ip_address,
-            first_name=first_name,
-            last_name=last_name,
-            downloaded_at=downloaded_at.strftime("%Y-%m-%d %H:%M UTC"),
-        )
-    except Exception as exc:
-        logger.warning("Download alert email failed: %s", exc)
-        return str(exc)
     return None
