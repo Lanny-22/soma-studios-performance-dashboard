@@ -11,7 +11,7 @@ from dashboard.data import (
     expense_totals_by_label,
     filter_expense_date_range,
     set_expense_manually_excluded,
-    set_expense_notes,
+    set_expense_dashboard_notes,
 )
 from dashboard.shared import (
     BAR_CHART_HEIGHT,
@@ -140,10 +140,8 @@ def _transaction_editor(label_rows: pd.DataFrame, selected_label: str, show_excl
         "%Y-%m-%d %H:%M"
     )
     editor_df["Exclude"] = editor_df["manually_excluded"]
-    if "notes" in editor_df.columns:
-        editor_df["Notes"] = editor_df["notes"].fillna("")
-    else:
-        editor_df["Notes"] = ""
+    editor_df["Import notes"] = editor_df.get("import_notes", pd.Series(dtype=str)).fillna("")
+    editor_df["Your notes"] = editor_df.get("dashboard_notes", pd.Series(dtype=str)).fillna("")
 
     editor_df = editor_df.rename(
         columns={
@@ -168,12 +166,13 @@ def _transaction_editor(label_rows: pd.DataFrame, selected_label: str, show_excl
         "Fee",
         "Spend",
         "Currency",
-        "Notes",
+        "Import notes",
+        "Your notes",
     ]
     before_exclude = dict(zip(editor_df["id"], editor_df["Exclude"]))
-    before_notes = {
+    before_dashboard_notes = {
         row_id: (str(notes).strip() if pd.notna(notes) and str(notes).strip() else "")
-        for row_id, notes in zip(editor_df["id"], editor_df["Notes"])
+        for row_id, notes in zip(editor_df["id"], editor_df["Your notes"])
     }
 
     edited = st.data_editor(
@@ -185,9 +184,14 @@ def _transaction_editor(label_rows: pd.DataFrame, selected_label: str, show_excl
                 help="Excluded transactions are removed from totals and charts.",
                 default=False,
             ),
-            "Notes": st.column_config.TextColumn(
-                "Notes",
-                help="Saved to Supabase for this transaction. Re-importing a Revolut CSV may overwrite from the export.",
+            "Import notes": st.column_config.TextColumn(
+                "Import notes",
+                help="From Revolut CSV export — updated on re-import.",
+                disabled=True,
+            ),
+            "Your notes": st.column_config.TextColumn(
+                "Your notes",
+                help="Studio notes saved in Supabase — never overwritten by CSV import.",
             ),
             "Amount": st.column_config.NumberColumn(format="€%.2f"),
             "Fee": st.column_config.NumberColumn(format="€%.2f"),
@@ -202,6 +206,7 @@ def _transaction_editor(label_rows: pd.DataFrame, selected_label: str, show_excl
             "Fee",
             "Spend",
             "Currency",
+            "Import notes",
         ],
         hide_index=True,
         use_container_width=True,
@@ -216,10 +221,10 @@ def _transaction_editor(label_rows: pd.DataFrame, selected_label: str, show_excl
             set_expense_manually_excluded(expense_id, excluded)
             changed = True
 
-        notes_val = row["Notes"]
+        notes_val = row["Your notes"]
         notes_text = str(notes_val).strip() if pd.notna(notes_val) and str(notes_val).strip() else ""
-        if notes_text != before_notes.get(expense_id, ""):
-            set_expense_notes(expense_id, notes_text or None)
+        if notes_text != before_dashboard_notes.get(expense_id, ""):
+            set_expense_dashboard_notes(expense_id, notes_text or None)
             changed = True
 
     if changed:
@@ -233,7 +238,7 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
         "Spend from Revolut Business (`revolut_expenses`) — rows labelled in Revolut "
         "excluding `NOT_EXPENSE`. Filtered by transaction completed date (Malta time). "
         "Click a label in the chart to see its transactions. Toggle **Exclude** to hide "
-        "individual rows from totals. Edit **Notes** inline — changes save to Supabase."
+        "individual rows from totals. Edit **Your notes** inline — import notes come from Revolut CSV only."
     )
 
     if raw is None or raw.empty:

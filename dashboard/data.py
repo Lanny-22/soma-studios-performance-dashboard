@@ -305,7 +305,8 @@ EXPENSES_QUERY = """
         currency,
         type,
         product,
-        notes,
+        import_notes,
+        dashboard_notes,
         manually_excluded
     FROM revolut_expenses
     WHERE completed_at IS NOT NULL
@@ -324,7 +325,8 @@ EXPENSES_ALL_QUERY = """
         currency,
         type,
         product,
-        notes,
+        import_notes,
+        dashboard_notes,
         manually_excluded
     FROM revolut_expenses
     WHERE completed_at IS NOT NULL
@@ -345,6 +347,9 @@ def _prepare_expenses_df(rows: list) -> pd.DataFrame:
     df["spend"] = df["amount"].abs()
     df["label"] = df["label"].fillna("Unknown")
     df["manually_excluded"] = df["manually_excluded"].fillna(False).astype(bool)
+    for col in ("import_notes", "dashboard_notes"):
+        if col in df.columns:
+            df[col] = df[col].fillna("")
     return df
 
 
@@ -364,16 +369,16 @@ def set_expense_manually_excluded(expense_id: str, excluded: bool) -> None:
         conn.commit()
 
 
-def set_expense_notes(expense_id: str, notes: str | None) -> None:
-    """Persist dashboard notes on the ledger row and mirrored expense row."""
+def set_expense_dashboard_notes(expense_id: str, notes: str | None) -> None:
+    """Persist studio notes on the ledger row and mirrored expense row."""
     normalized = (notes or "").strip() or None
     with get_conn() as conn:
         conn.execute(
-            "UPDATE revolut_transactions SET notes = %s WHERE id = %s",
+            "UPDATE revolut_transactions SET dashboard_notes = %s WHERE id = %s",
             (normalized, expense_id),
         )
         conn.execute(
-            "UPDATE revolut_expenses SET notes = %s WHERE id = %s",
+            "UPDATE revolut_expenses SET dashboard_notes = %s WHERE id = %s",
             (normalized, expense_id),
         )
         conn.commit()
@@ -553,7 +558,8 @@ def build_download_export(
                 "fee",
                 "spend",
                 "currency",
-                "notes",
+                "import_notes",
+                "dashboard_notes",
                 "manually_excluded",
             ]
         ]
