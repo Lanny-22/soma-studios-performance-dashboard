@@ -11,6 +11,7 @@ from dashboard.data import (
     expense_totals_by_label,
     filter_expense_date_range,
     set_expense_manually_excluded,
+    set_expense_notes,
 )
 from dashboard.shared import (
     BAR_CHART_HEIGHT,
@@ -170,6 +171,10 @@ def _transaction_editor(label_rows: pd.DataFrame, selected_label: str, show_excl
         "Notes",
     ]
     before_exclude = dict(zip(editor_df["id"], editor_df["Exclude"]))
+    before_notes = {
+        row_id: (str(notes).strip() if pd.notna(notes) and str(notes).strip() else "")
+        for row_id, notes in zip(editor_df["id"], editor_df["Notes"])
+    }
 
     edited = st.data_editor(
         editor_df[table_cols],
@@ -179,6 +184,10 @@ def _transaction_editor(label_rows: pd.DataFrame, selected_label: str, show_excl
                 "Exclude",
                 help="Excluded transactions are removed from totals and charts.",
                 default=False,
+            ),
+            "Notes": st.column_config.TextColumn(
+                "Notes",
+                help="Saved to Supabase for this transaction. Re-importing a Revolut CSV may overwrite from the export.",
             ),
             "Amount": st.column_config.NumberColumn(format="€%.2f"),
             "Fee": st.column_config.NumberColumn(format="€%.2f"),
@@ -193,7 +202,6 @@ def _transaction_editor(label_rows: pd.DataFrame, selected_label: str, show_excl
             "Fee",
             "Spend",
             "Currency",
-            "Notes",
         ],
         hide_index=True,
         use_container_width=True,
@@ -208,6 +216,12 @@ def _transaction_editor(label_rows: pd.DataFrame, selected_label: str, show_excl
             set_expense_manually_excluded(expense_id, excluded)
             changed = True
 
+        notes_val = row["Notes"]
+        notes_text = str(notes_val).strip() if pd.notna(notes_val) and str(notes_val).strip() else ""
+        if notes_text != before_notes.get(expense_id, ""):
+            set_expense_notes(expense_id, notes_text or None)
+            changed = True
+
     if changed:
         clear_expense_cache()
         st.rerun()
@@ -219,7 +233,7 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
         "Spend from Revolut Business (`revolut_expenses`) — rows labelled in Revolut "
         "excluding `NOT_EXPENSE`. Filtered by transaction completed date (Malta time). "
         "Click a label in the chart to see its transactions. Toggle **Exclude** to hide "
-        "individual rows from totals."
+        "individual rows from totals. Edit **Notes** inline — changes save to Supabase."
     )
 
     if raw is None or raw.empty:

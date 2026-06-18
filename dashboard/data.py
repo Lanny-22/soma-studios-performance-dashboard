@@ -364,6 +364,21 @@ def set_expense_manually_excluded(expense_id: str, excluded: bool) -> None:
         conn.commit()
 
 
+def set_expense_notes(expense_id: str, notes: str | None) -> None:
+    """Persist dashboard notes on the ledger row and mirrored expense row."""
+    normalized = (notes or "").strip() or None
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE revolut_transactions SET notes = %s WHERE id = %s",
+            (normalized, expense_id),
+        )
+        conn.execute(
+            "UPDATE revolut_expenses SET notes = %s WHERE id = %s",
+            (normalized, expense_id),
+        )
+        conn.commit()
+
+
 def filter_expense_date_range(df: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
     if df.empty:
         return df
