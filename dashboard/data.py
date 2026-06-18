@@ -584,3 +584,48 @@ def build_download_export(
         ].sort_values(["report_month", "instructor_name"])
 
     return pd.DataFrame()
+
+
+def log_download_event(
+    *,
+    dataset_key: str,
+    dataset_label: str,
+    file_name: str,
+    date_range_start: date,
+    date_range_end: date,
+    row_count: int,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    first_name: str | None = None,
+    last_name: str | None = None,
+) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO download_log (
+                ip_address,
+                user_agent,
+                first_name,
+                last_name,
+                dataset_key,
+                dataset_label,
+                file_name,
+                date_range_start,
+                date_range_end,
+                row_count
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                ip_address,
+                user_agent,
+                (first_name or "").strip() or None,
+                (last_name or "").strip() or None,
+                dataset_key,
+                dataset_label,
+                file_name,
+                date_range_start,
+                date_range_end,
+                row_count,
+            ),
+        )
+        conn.commit()

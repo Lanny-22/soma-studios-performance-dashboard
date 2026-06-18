@@ -11,12 +11,37 @@ from dashboard.data import (
     combined_download_date_bounds,
     load_instructor_performance,
     load_total_sales_export,
+    log_download_event,
 )
-from dashboard.shared import cached_all_expenses
+from dashboard.shared import cached_all_expenses, client_request_meta, download_user_names
 
 
 def _download_filename(prefix: str, start: date, end: date) -> str:
     return f"{prefix}_{start:%Y%m%d}_{end:%Y%m%d}.csv"
+
+
+def _record_download(
+    dataset_key: str,
+    dataset_label: str,
+    file_name: str,
+    range_start: str,
+    range_end: str,
+    row_count: int,
+) -> None:
+    meta = client_request_meta()
+    first_name, last_name = download_user_names()
+    log_download_event(
+        dataset_key=dataset_key,
+        dataset_label=dataset_label,
+        file_name=file_name,
+        date_range_start=date.fromisoformat(range_start),
+        date_range_end=date.fromisoformat(range_end),
+        row_count=row_count,
+        ip_address=meta.get("ip_address"),
+        user_agent=meta.get("user_agent"),
+        first_name=first_name,
+        last_name=last_name,
+    )
 
 
 @st.cache_data(ttl=300, show_spinner="Loading sales export data…")
@@ -69,6 +94,12 @@ def render(
     if not isinstance(start, date):
         start, end = start[0], start[1]
 
+    with st.expander("Your details (optional)", expanded=False):
+        st.caption("If provided, your name is stored in the download audit log with each export.")
+        n1, n2 = st.columns(2)
+        n1.text_input("First name", key="download_user_first_name")
+        n2.text_input("Last name", key="download_user_last_name")
+
     if not selected:
         st.info("Choose at least one dataset to export.")
         return
@@ -97,11 +128,21 @@ def render(
         with st.expander("Preview (first 20 rows)", expanded=False):
             st.dataframe(export_df.head(20), use_container_width=True, hide_index=True)
 
+        file_name = _download_filename(meta["file_prefix"], start, end)
         csv_bytes = export_df.to_csv(index=False).encode("utf-8")
         st.download_button(
             label=f"Download {meta['label']} CSV",
             data=csv_bytes,
-            file_name=_download_filename(meta["file_prefix"], start, end),
+            file_name=file_name,
             mime="text/csv",
             key=f"download_btn_{dataset_key}",
+            on_click=_record_download,
+            kwargs={
+                "dataset_key": dataset_key,
+                "dataset_label": meta["label"],
+                "file_name": file_name,
+                "range_start": start.isoformat(),
+                "range_end": end.isoformat(),
+                "row_count": len(export_df),
+            },
         )

@@ -183,3 +183,31 @@ def sidebar_date_range(
 
 def filter_date_range(df: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
     return df[(df["sale_date"] >= start) & (df["sale_date"] <= end)]
+
+
+def client_request_meta() -> dict[str, str | None]:
+    """Best-effort client IP and user agent (Streamlit Cloud / reverse proxy)."""
+    ip_address: str | None = None
+    user_agent: str | None = None
+    try:
+        ctx = st.context
+        if hasattr(ctx, "ip_address") and ctx.ip_address:
+            ip_address = str(ctx.ip_address)
+        headers = getattr(ctx, "headers", None) or {}
+        if not ip_address and headers:
+            forwarded = headers.get("X-Forwarded-For") or headers.get("x-forwarded-for")
+            if forwarded:
+                ip_address = str(forwarded).split(",")[0].strip()
+            if not ip_address:
+                ip_address = headers.get("X-Real-Ip") or headers.get("x-real-ip")
+        if headers:
+            user_agent = headers.get("User-Agent") or headers.get("user-agent")
+    except Exception:
+        pass
+    return {"ip_address": ip_address, "user_agent": user_agent}
+
+
+def download_user_names() -> tuple[str | None, str | None]:
+    first = (st.session_state.get("download_user_first_name") or "").strip()
+    last = (st.session_state.get("download_user_last_name") or "").strip()
+    return first or None, last or None
