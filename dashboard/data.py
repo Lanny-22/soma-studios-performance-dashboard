@@ -51,6 +51,97 @@ def load_total_sales() -> pd.DataFrame:
     return df
 
 
+CLASS_OCCUPANCY_QUERY = """
+    SELECT
+        class_name,
+        class_at,
+        instructor_name,
+        location,
+        capacity,
+        bookings,
+        check_ins,
+        no_shows,
+        late_cancellations,
+        occupancy_pct
+    FROM momence_class_occupancy
+    WHERE class_at IS NOT NULL
+    ORDER BY class_at
+"""
+
+
+def load_class_occupancy() -> pd.DataFrame:
+    with get_conn() as conn:
+        rows = conn.execute(CLASS_OCCUPANCY_QUERY).fetchall()
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    df["class_at"] = pd.to_datetime(df["class_at"], utc=True)
+    local = df["class_at"].dt.tz_convert(STUDIO_TIMEZONE)
+    df["class_date"] = local.dt.date
+    df["class_hour"] = local.dt.hour.astype("Int64")
+    df["class_day"] = local.dt.day_name()
+    for col in ("capacity", "bookings", "check_ins", "no_shows", "late_cancellations"):
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+    df["occupancy_pct"] = pd.to_numeric(df["occupancy_pct"], errors="coerce").fillna(0)
+    return df
+
+
+def filter_class_date_range(df: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
+    if df.empty:
+        return df
+    return df[(df["class_date"] >= start) & (df["class_date"] <= end)].copy()
+
+
+def _occupancy_agg(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+    return df.groupby(["class_day", "class_hour"], as_index=False).agg(
+        avg_occupancy=("occupancy_pct", "mean"),
+        total_bookings=("bookings", "sum"),
+        total_check_ins=("check_ins", "sum"),
+        class_sessions=("class_at", "count"),
+    )
+
+
+def occupancy_timing_matrix(df: pd.DataFrame) -> pd.DataFrame:
+    matrix = _occupancy_agg(df)
+    if matrix.empty:
+        return matrix
+    matrix["class_hour"] = matrix["class_hour"].astype(int)
+    return matrix
+
+
+def occupancy_day_totals(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+    totals = df.groupby("class_day", as_index=False).agg(
+        avg_occupancy=("occupancy_pct", "mean"),
+        total_bookings=("bookings", "sum"),
+        total_check_ins=("check_ins", "sum"),
+        class_sessions=("class_at", "count"),
+    )
+    totals["class_day"] = pd.Categorical(totals["class_day"], categories=DAY_ORDER, ordered=True)
+    return totals.sort_values("class_day")
+
+
+def occupancy_hour_totals(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+    totals = (
+        df.groupby("class_hour", as_index=False)
+        .agg(
+            avg_occupancy=("occupancy_pct", "mean"),
+            total_bookings=("bookings", "sum"),
+            total_check_ins=("check_ins", "sum"),
+            class_sessions=("class_at", "count"),
+        )
+        .sort_values("class_hour")
+    )
+    totals["class_hour"] = totals["class_hour"].astype(int)
+    return totals
+
+
 def _with_per_class_metrics(grouped: pd.DataFrame) -> pd.DataFrame:
     grouped = grouped.copy()
     sessions = grouped["class_sessions"].replace(0, pd.NA)

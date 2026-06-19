@@ -3,6 +3,7 @@
 import streamlit as st
 
 from dashboard.shared import (
+    load_class_occupancy_or_error,
     load_expenses_or_error,
     load_instructor_or_error,
     load_sales_or_error,
@@ -57,7 +58,7 @@ def _run_instructors() -> None:
 
 def _run_peak_times() -> None:
     render_peak_times(
-        st.session_state["dash_raw"],
+        st.session_state.get("dash_occupancy_raw"),
         st.session_state["dash_start"],
         st.session_state["dash_end"],
     )
@@ -103,12 +104,14 @@ def main() -> None:
         return
 
     expenses = load_expenses_or_error()
-    start, end = sidebar_date_range(raw, expenses=expenses)
+    occupancy = load_class_occupancy_or_error()
+    start, end = sidebar_date_range(raw, expenses=expenses, occupancy=occupancy)
     st.session_state["dash_raw"] = raw
     st.session_state["dash_start"] = start
     st.session_state["dash_end"] = end
     st.session_state["dash_instructor_raw"] = load_instructor_or_error()
     st.session_state["dash_expense_raw"] = expenses
+    st.session_state["dash_occupancy_raw"] = occupancy
 
     nav = st.navigation(
         [
