@@ -8,7 +8,6 @@ import streamlit as st
 
 from dashboard.data import (
     aggregate_instructors,
-    describe_instructor_coverage,
     filter_instructor_performance,
     instructor_month_comparison,
 )
@@ -58,20 +57,13 @@ def _horizontal_bars(
 def render(raw: pd.DataFrame, start: date, end: date) -> None:
     st.title("Instructor Performance")
     st.caption(
-        "Rankings from Momence instructor reports. "
-        "Popularity uses total bookings; profitability is gross revenue minus instructor payout "
-        "(studio net); net revenue per class is studio net divided by classes taught."
+        "Class-level instructor pay from Momence exports. Metrics respect your sidebar **class dates** "
+        "(Malta time): gross revenue and payouts are summed per instructor across classes in range."
     )
-
-    summary, coverage_warnings = describe_instructor_coverage(raw, start, end)
-    if summary:
-        st.caption(summary)
-    for warning in coverage_warnings:
-        st.warning(warning)
 
     filtered = filter_instructor_performance(raw, start, end)
     if filtered.empty:
-        st.warning("No instructor performance data overlaps the selected date range.")
+        st.warning("No instructor class sessions in the selected date range.")
         return
 
     ranked = aggregate_instructors(filtered)
@@ -85,7 +77,7 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
     margin = (studio_net / gross * 100) if gross > 0 else 0
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Total bookings", f"{total_bookings:,}")
+    c1.metric("Participants", f"{total_bookings:,}")
     c2.metric("Classes taught", f"{total_classes:,}")
     c3.metric("Gross revenue", EUR.format(gross))
     c4.metric("Net revenue per class", EUR.format(net_revenue_per_class))
@@ -101,19 +93,19 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
     st.subheader("Rankings")
     tab_pop, tab_profit, tab_rpc = st.tabs(
         [
-            "By popularity (bookings)",
+            "By popularity (participants)",
             "By profitability (studio net)",
             "By net revenue per class",
         ]
     )
 
     with tab_pop:
-        st.markdown("**Top instructors by total bookings** in the selected period.")
+        st.markdown("**Top instructors by participants** in the selected period.")
         _horizontal_bars(
             by_popularity.head(12),
-            "Bookings by instructor",
+            "Participants by instructor",
             "total_bookings",
-            "Total bookings",
+            "Participants",
             GREEN,
         )
 
@@ -145,7 +137,7 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
     st.subheader("Month-over-month")
     month_table = instructor_month_comparison(raw, start, end)
     if month_table.empty:
-        st.info("No monthly instructor reports overlap the selected date range.")
+        st.info("No monthly instructor data in the selected date range.")
     else:
         display_month = month_table.copy()
         for col in display_month.columns:
@@ -168,8 +160,7 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
 
         st.dataframe(display_month, use_container_width=True, hide_index=True)
         st.caption(
-            "Monthly columns come from Momence instructor exports. "
-            "Period start/end show each CSV's covered dates. "
+            "Monthly columns aggregate class sessions by calendar month. "
             "Change columns compare the first and last month in your selected range."
         )
 
@@ -201,9 +192,9 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
         hide_index=True,
         column_config={
             "instructor_name": "Instructor",
-            "total_bookings": st.column_config.NumberColumn("Bookings", format="%d"),
+            "total_bookings": st.column_config.NumberColumn("Participants", format="%d"),
             "class_count": st.column_config.NumberColumn("Classes", format="%d"),
-            "average_attendance": "Avg attendance",
+            "average_attendance": "Avg check-in rate",
             "total_hours": "Hours",
             "gross_revenue": "Gross revenue",
             "net_revenue_per_class": "Net revenue / class",

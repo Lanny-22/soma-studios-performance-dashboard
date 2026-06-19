@@ -248,22 +248,27 @@ def item_breakdown(df: pd.DataFrame, categories: list[str]) -> pd.DataFrame:
 
 INSTRUCTOR_QUERY = """
     SELECT
-        report_month,
-        period_start,
-        period_end,
-        source_file,
-        imported_at,
+        class_name,
+        class_at,
+        location,
+        payrate,
+        total_revenue,
+        base_payout,
+        additional_payout,
+        total_payout,
+        tip,
+        participants,
+        checked_in,
+        comps,
+        checked_in_comps,
+        late_cancellations,
+        non_paid_customers,
+        hours,
         instructor_first_name,
-        instructor_last_name,
-        instructor_email,
-        average_attendance,
-        total_bookings,
-        gross_revenue,
-        instructor_payout,
-        class_count,
-        total_hours
+        instructor_last_name
     FROM momence_instructor_performance
-    ORDER BY report_month, instructor_last_name, instructor_first_name
+    WHERE class_at IS NOT NULL
+    ORDER BY class_at
 """
 
 
@@ -274,50 +279,45 @@ def load_instructor_performance() -> pd.DataFrame:
         return pd.DataFrame()
 
     df = pd.DataFrame(rows)
-    for col in (
-        "average_attendance",
-        "total_bookings",
-        "gross_revenue",
-        "instructor_payout",
-        "class_count",
-        "total_hours",
-    ):
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+    df["class_at"] = pd.to_datetime(df["class_at"], utc=True)
+    local = df["class_at"].dt.tz_convert(STUDIO_TIMEZONE)
+    df["class_date"] = local.dt.date
+    df["class_month"] = local.dt.to_period("M").dt.to_timestamp().dt.date
 
-    df["report_month"] = pd.to_datetime(df["report_month"]).dt.date
-    df["period_start"] = pd.to_datetime(df["period_start"]).dt.date
-    df["period_end"] = pd.to_datetime(df["period_end"]).dt.date
-    df["imported_at"] = pd.to_datetime(df["imported_at"], utc=True)
+    money_cols = (
+        "total_revenue",
+        "base_payout",
+        "additional_payout",
+        "total_payout",
+        "tip",
+        "hours",
+    )
+    for col in money_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+    for col in (
+        "participants",
+        "checked_in",
+        "comps",
+        "checked_in_comps",
+        "late_cancellations",
+        "non_paid_customers",
+    ):
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+
     df["instructor_name"] = (
         df["instructor_first_name"].fillna("").astype(str).str.strip()
         + " "
         + df["instructor_last_name"].fillna("").astype(str).str.strip()
     ).str.strip()
+    df["gross_revenue"] = df["total_revenue"]
+    df["instructor_payout"] = df["total_payout"]
+    df["total_bookings"] = df["participants"]
+    df["class_count"] = 1
+    df["total_hours"] = df["hours"]
     df["studio_net"] = df["gross_revenue"] - df["instructor_payout"]
+    participants = df["participants"].replace(0, pd.NA)
+    df["average_attendance"] = (df["checked_in"] / participants).fillna(0)
     return df
-
-
-def _period_overlaps_range(period_start: date, period_end: date, start: date, end: date) -> bool:
-    return period_start <= end and period_end >= start
-
-
-def _dedupe_instructor_exports(df: pd.DataFrame) -> pd.DataFrame:
-    """When multiple exports overlap, keep the narrowest period per instructor per month."""
-    if df.empty:
-        return df
-    work = df.copy()
-    work["period_days"] = work.apply(
-        lambda r: (r["period_end"] - r["period_start"]).days + 1,
-        axis=1,
-    )
-    work = work.sort_values(
-        ["instructor_email", "report_month", "period_days", "imported_at"],
-        ascending=[True, True, True, False],
-    )
-    return work.drop_duplicates(
-        subset=["instructor_email", "report_month"],
-        keep="first",
-    ).drop(columns=["period_days"])
 
 
 def filter_instructor_performance(
@@ -327,66 +327,7 @@ def filter_instructor_performance(
 ) -> pd.DataFrame:
     if df.empty:
         return df
-
-    mask = df.apply(
-        lambda r: _period_overlaps_range(r["period_start"], r["period_end"], start, end),
-        axis=1,
-    )
-    filtered = df.loc[mask].copy()
-    return _dedupe_instructor_exports(filtered)
-
-
-def describe_instructor_coverage(
-    df: pd.DataFrame,
-    start: date,
-    end: date,
-) -> tuple[str, list[str]]:
-    """Explain which Momence instructor exports feed the current sidebar dates."""
-    if df.empty:
-        return "", []
-
-    filtered = filter_instructor_performance(df, start, end)
-    if filtered.empty:
-        return "", []
-
-    warnings: list[str] = []
-    report_bits: list[str] = []
-    grouped = (
-        filtered[
-            ["period_start", "period_end", "source_file", "gross_revenue", "instructor_payout"]
-        ]
-        .drop_duplicates(["period_start", "period_end", "source_file"])
-        .sort_values(["period_start", "period_end"])
-    )
-
-    for _, row in grouped.iterrows():
-        ps, pe = row["period_start"], row["period_end"]
-        gross = float(filtered.loc[filtered["period_start"].eq(ps) & filtered["period_end"].eq(pe), "gross_revenue"].sum())
-        payout = float(
-            filtered.loc[filtered["period_start"].eq(ps) & filtered["period_end"].eq(pe), "instructor_payout"].sum()
-        )
-        label = f"{ps:%d %b %Y} – {pe:%d %b %Y}"
-        report_bits.append(f"{label} (gross {EUR_DISPLAY.format(gross)}, payouts {EUR_DISPLAY.format(payout)})")
-
-        if ps < start or pe > end:
-            warnings.append(
-                f"The Momence instructor export for **{label}** covers the full report period in the CSV, "
-                f"not your sidebar dates **{start:%d %b} – {end:%d %b %Y}**. "
-                f"Momence's in-app date filter uses live data for that window; this dashboard uses "
-                f"the imported monthly export (currently **{EUR_DISPLAY.format(gross)}** gross). "
-                f"To match a custom range, export Instructor Performance from Momence with the same "
-                f"dates and import the CSV (filename can include the range, e.g. "
-                f"`InstructorPerformance_20260601_20260617.csv`)."
-            )
-
-    summary = (
-        "Instructor metrics come from Momence **Instructor Performance** CSV exports. "
-        f"Included for your selection: {'; '.join(report_bits)}."
-    )
-    return summary, warnings
-
-
-EUR_DISPLAY = "€{:,.2f}"
+    return df[(df["class_date"] >= start) & (df["class_date"] <= end)].copy()
 
 
 def aggregate_instructors(df: pd.DataFrame) -> pd.DataFrame:
@@ -397,7 +338,6 @@ def aggregate_instructors(df: pd.DataFrame) -> pd.DataFrame:
         att_weight=df["average_attendance"] * df["total_bookings"]
     ).groupby("instructor_name", as_index=False).agg(
         att_weight=("att_weight", "sum"),
-        instructor_email=("instructor_email", "first"),
         total_bookings=("total_bookings", "sum"),
         gross_revenue=("gross_revenue", "sum"),
         instructor_payout=("instructor_payout", "sum"),
@@ -420,23 +360,17 @@ def aggregate_instructors(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def instructor_month_comparison(df: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
-    """Wide instructor table with one column per report month in range."""
+    """Wide instructor table with one column per calendar month in range."""
     filtered = filter_instructor_performance(df, start, end)
     if filtered.empty:
         return pd.DataFrame()
 
     rows = filtered.copy()
-    rows["month_label"] = rows["report_month"].apply(
-        lambda d: d.strftime("%b %Y") if isinstance(d, date) else str(d)
-    )
-    rows["net_revenue_per_class"] = (
-        rows["studio_net"] / rows["class_count"].replace(0, pd.NA)
-    ).fillna(0)
-
+    rows["month_label"] = pd.to_datetime(rows["class_month"]).dt.strftime("%b %Y")
     month_order = (
-        rows[["report_month", "month_label"]]
+        rows[["class_month", "month_label"]]
         .drop_duplicates()
-        .sort_values("report_month")["month_label"]
+        .sort_values("class_month")["month_label"]
         .tolist()
     )
 
@@ -451,11 +385,18 @@ def instructor_month_comparison(df: pd.DataFrame, start: date, end: date) -> pd.
                 record[f"net_per_class_{month_label}"] = None
                 record[f"studio_net_{month_label}"] = None
                 continue
-            row = month_rows.iloc[0]
-            record[f"classes_{month_label}"] = int(row["class_count"])
-            record[f"attendance_{month_label}"] = float(row["average_attendance"])
-            record[f"net_per_class_{month_label}"] = float(row["net_revenue_per_class"])
-            record[f"studio_net_{month_label}"] = float(row["studio_net"])
+            classes = len(month_rows)
+            bookings = int(month_rows["total_bookings"].sum())
+            att = (
+                (month_rows["average_attendance"] * month_rows["total_bookings"]).sum() / bookings
+                if bookings > 0
+                else 0
+            )
+            studio_net = float(month_rows["studio_net"].sum())
+            record[f"classes_{month_label}"] = classes
+            record[f"attendance_{month_label}"] = att
+            record[f"net_per_class_{month_label}"] = studio_net / classes if classes else 0
+            record[f"studio_net_{month_label}"] = studio_net
         records.append(record)
 
     wide = pd.DataFrame(records)
@@ -621,7 +562,7 @@ DOWNLOAD_DATASETS: dict[str, dict[str, str]] = {
     },
     "instructor_performance": {
         "label": "Instructor Performance",
-        "description": "Momence instructor monthly reports overlapping the selected date range.",
+        "description": "Momence instructor pay by class session — filtered by class date (Malta time).",
         "file_prefix": "soma_instructor_performance",
     },
     "class_occupancy": {
@@ -673,7 +614,7 @@ def combined_download_date_bounds(
     if expenses is not None and not expenses.empty:
         bounds.extend([expenses["expense_date"].min(), expenses["expense_date"].max()])
     if instructors is not None and not instructors.empty:
-        bounds.extend([instructors["report_month"].min(), instructors["report_month"].max()])
+        bounds.extend([instructors["class_date"].min(), instructors["class_date"].max()])
     if occupancy is not None and not occupancy.empty:
         bounds.extend([occupancy["class_date"].min(), occupancy["class_date"].max()])
     if not bounds:
@@ -759,22 +700,26 @@ def build_download_export(
         if instructors is None or instructors.empty:
             return pd.DataFrame()
         filtered = filter_instructor_performance(instructors, start, end)
+        filtered = _format_datetimes_for_csv(filtered, ["class_at"])
         return filtered[
             [
-                "report_month",
-                "period_start",
-                "period_end",
+                "class_name",
+                "class_at",
+                "class_date",
                 "instructor_name",
-                "instructor_email",
-                "average_attendance",
-                "total_bookings",
-                "gross_revenue",
-                "instructor_payout",
-                "studio_net",
-                "class_count",
-                "total_hours",
+                "location",
+                "payrate",
+                "total_revenue",
+                "base_payout",
+                "additional_payout",
+                "total_payout",
+                "tip",
+                "participants",
+                "checked_in",
+                "late_cancellations",
+                "hours",
             ]
-        ].sort_values(["report_month", "instructor_name"])
+        ].sort_values(["class_date", "instructor_name", "class_at"])
 
     if dataset_key == "class_occupancy":
         if occupancy is None or occupancy.empty:
