@@ -1,5 +1,7 @@
 """Load Momence sales data from Supabase for the analytics dashboard."""
 
+from __future__ import annotations
+
 import calendar
 import logging
 from datetime import date, datetime, timezone
@@ -282,7 +284,7 @@ def load_instructor_performance() -> pd.DataFrame:
     df["class_at"] = pd.to_datetime(df["class_at"], utc=True)
     local = df["class_at"].dt.tz_convert(STUDIO_TIMEZONE)
     df["class_date"] = local.dt.date
-    df["class_month"] = local.dt.to_period("M").dt.to_timestamp().dt.date
+    df["class_month"] = local.map(lambda ts: date(ts.year, ts.month, 1))
 
     money_cols = (
         "total_revenue",
