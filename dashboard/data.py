@@ -249,6 +249,10 @@ def item_breakdown(df: pd.DataFrame, categories: list[str]) -> pd.DataFrame:
 INSTRUCTOR_QUERY = """
     SELECT
         report_month,
+        period_start,
+        period_end,
+        source_file,
+        imported_at,
         instructor_first_name,
         instructor_last_name,
         instructor_email,
@@ -281,6 +285,9 @@ def load_instructor_performance() -> pd.DataFrame:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
     df["report_month"] = pd.to_datetime(df["report_month"]).dt.date
+    df["period_start"] = pd.to_datetime(df["period_start"]).dt.date
+    df["period_end"] = pd.to_datetime(df["period_end"]).dt.date
+    df["imported_at"] = pd.to_datetime(df["imported_at"], utc=True)
     df["instructor_name"] = (
         df["instructor_first_name"].fillna("").astype(str).str.strip()
         + " "
@@ -288,6 +295,29 @@ def load_instructor_performance() -> pd.DataFrame:
     ).str.strip()
     df["studio_net"] = df["gross_revenue"] - df["instructor_payout"]
     return df
+
+
+def _period_overlaps_range(period_start: date, period_end: date, start: date, end: date) -> bool:
+    return period_start <= end and period_end >= start
+
+
+def _dedupe_instructor_exports(df: pd.DataFrame) -> pd.DataFrame:
+    """When multiple exports overlap, keep the narrowest period per instructor per month."""
+    if df.empty:
+        return df
+    work = df.copy()
+    work["period_days"] = work.apply(
+        lambda r: (r["period_end"] - r["period_start"]).days + 1,
+        axis=1,
+    )
+    work = work.sort_values(
+        ["instructor_email", "report_month", "period_days", "imported_at"],
+        ascending=[True, True, True, False],
+    )
+    return work.drop_duplicates(
+        subset=["instructor_email", "report_month"],
+        keep="first",
+    ).drop(columns=["period_days"])
 
 
 def filter_instructor_performance(
@@ -298,14 +328,65 @@ def filter_instructor_performance(
     if df.empty:
         return df
 
-    def month_overlaps(month_start: date) -> bool:
-        last_day = month_start.replace(
-            day=calendar.monthrange(month_start.year, month_start.month)[1]
-        )
-        return month_start <= end and last_day >= start
+    mask = df.apply(
+        lambda r: _period_overlaps_range(r["period_start"], r["period_end"], start, end),
+        axis=1,
+    )
+    filtered = df.loc[mask].copy()
+    return _dedupe_instructor_exports(filtered)
 
-    mask = df["report_month"].map(month_overlaps)
-    return df.loc[mask].copy()
+
+def describe_instructor_coverage(
+    df: pd.DataFrame,
+    start: date,
+    end: date,
+) -> tuple[str, list[str]]:
+    """Explain which Momence instructor exports feed the current sidebar dates."""
+    if df.empty:
+        return "", []
+
+    filtered = filter_instructor_performance(df, start, end)
+    if filtered.empty:
+        return "", []
+
+    warnings: list[str] = []
+    report_bits: list[str] = []
+    grouped = (
+        filtered[
+            ["period_start", "period_end", "source_file", "gross_revenue", "instructor_payout"]
+        ]
+        .drop_duplicates(["period_start", "period_end", "source_file"])
+        .sort_values(["period_start", "period_end"])
+    )
+
+    for _, row in grouped.iterrows():
+        ps, pe = row["period_start"], row["period_end"]
+        gross = float(filtered.loc[filtered["period_start"].eq(ps) & filtered["period_end"].eq(pe), "gross_revenue"].sum())
+        payout = float(
+            filtered.loc[filtered["period_start"].eq(ps) & filtered["period_end"].eq(pe), "instructor_payout"].sum()
+        )
+        label = f"{ps:%d %b %Y} – {pe:%d %b %Y}"
+        report_bits.append(f"{label} (gross {EUR_DISPLAY.format(gross)}, payouts {EUR_DISPLAY.format(payout)})")
+
+        if ps < start or pe > end:
+            warnings.append(
+                f"The Momence instructor export for **{label}** covers the full report period in the CSV, "
+                f"not your sidebar dates **{start:%d %b} – {end:%d %b %Y}**. "
+                f"Momence's in-app date filter uses live data for that window; this dashboard uses "
+                f"the imported monthly export (currently **{EUR_DISPLAY.format(gross)}** gross). "
+                f"To match a custom range, export Instructor Performance from Momence with the same "
+                f"dates and import the CSV (filename can include the range, e.g. "
+                f"`InstructorPerformance_20260601_20260617.csv`)."
+            )
+
+    summary = (
+        "Instructor metrics come from Momence **Instructor Performance** CSV exports. "
+        f"Included for your selection: {'; '.join(report_bits)}."
+    )
+    return summary, warnings
+
+
+EUR_DISPLAY = "€{:,.2f}"
 
 
 def aggregate_instructors(df: pd.DataFrame) -> pd.DataFrame:
@@ -681,6 +762,8 @@ def build_download_export(
         return filtered[
             [
                 "report_month",
+                "period_start",
+                "period_end",
                 "instructor_name",
                 "instructor_email",
                 "average_attendance",

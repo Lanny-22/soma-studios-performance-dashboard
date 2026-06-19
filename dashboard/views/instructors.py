@@ -6,7 +6,12 @@ import plotly.graph_objects as go
 import pandas as pd
 import streamlit as st
 
-from dashboard.data import aggregate_instructors, filter_instructor_performance, instructor_month_comparison
+from dashboard.data import (
+    aggregate_instructors,
+    describe_instructor_coverage,
+    filter_instructor_performance,
+    instructor_month_comparison,
+)
 from dashboard.shared import BAR_CHART_HEIGHT, BLACK, EUR, GREEN, GREEN_LIGHT, PLOTLY_CONFIG
 
 
@@ -57,6 +62,12 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
         "Popularity uses total bookings; profitability is gross revenue minus instructor payout "
         "(studio net); net revenue per class is studio net divided by classes taught."
     )
+
+    summary, coverage_warnings = describe_instructor_coverage(raw, start, end)
+    if summary:
+        st.caption(summary)
+    for warning in coverage_warnings:
+        st.warning(warning)
 
     filtered = filter_instructor_performance(raw, start, end)
     if filtered.empty:
@@ -157,7 +168,8 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
 
         st.dataframe(display_month, use_container_width=True, hide_index=True)
         st.caption(
-            "Monthly columns come from Momence instructor exports (full calendar months). "
+            "Monthly columns come from Momence instructor exports. "
+            "Period start/end show each CSV's covered dates. "
             "Change columns compare the first and last month in your selected range."
         )
 
