@@ -12,6 +12,13 @@ logger = logging.getLogger(__name__)
 STUDIO_TIMEZONE = "Europe/Malta"
 DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
+
+def format_studio_hour_label(hour: int) -> str:
+    """Malta local hour bucket label for charts (e.g. 6 -> '6:00 AM', 19 -> '7:00 PM')."""
+    suffix = "AM" if hour < 12 else "PM"
+    hour_12 = hour % 12 or 12
+    return f"{hour_12}:00 {suffix}"
+
 SALES_QUERY = """
     SELECT
         payment_at,
@@ -81,6 +88,7 @@ def load_class_occupancy() -> pd.DataFrame:
     df["class_date"] = local.dt.date
     df["class_hour"] = local.dt.hour.astype("Int64")
     df["class_day"] = local.dt.day_name()
+    df["class_time"] = local.dt.strftime("%H:%M")
     for col in ("capacity", "bookings", "check_ins", "no_shows", "late_cancellations"):
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
     df["occupancy_pct"] = pd.to_numeric(df["occupancy_pct"], errors="coerce").fillna(0)
@@ -535,6 +543,11 @@ DOWNLOAD_DATASETS: dict[str, dict[str, str]] = {
         "description": "Momence instructor monthly reports overlapping the selected date range.",
         "file_prefix": "soma_instructor_performance",
     },
+    "class_occupancy": {
+        "label": "Class Occupancy (Momence)",
+        "description": "Momence class occupancy report — filtered by class date and time (Malta).",
+        "file_prefix": "soma_class_occupancy",
+    },
 }
 
 
@@ -571,6 +584,7 @@ def combined_download_date_bounds(
     sales: pd.DataFrame | None = None,
     expenses: pd.DataFrame | None = None,
     instructors: pd.DataFrame | None = None,
+    occupancy: pd.DataFrame | None = None,
 ) -> tuple[date, date]:
     bounds: list[date] = []
     if sales is not None and not sales.empty and "payment_date" in sales.columns:
@@ -579,6 +593,8 @@ def combined_download_date_bounds(
         bounds.extend([expenses["expense_date"].min(), expenses["expense_date"].max()])
     if instructors is not None and not instructors.empty:
         bounds.extend([instructors["report_month"].min(), instructors["report_month"].max()])
+    if occupancy is not None and not occupancy.empty:
+        bounds.extend([occupancy["class_date"].min(), occupancy["class_date"].max()])
     if not bounds:
         today = date.today()
         return today, today
@@ -602,6 +618,7 @@ def build_download_export(
     sales_export: pd.DataFrame | None = None,
     expenses_all: pd.DataFrame | None = None,
     instructors: pd.DataFrame | None = None,
+    occupancy: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     if dataset_key == "total_sales":
         if sales_export is None or sales_export.empty:
@@ -675,6 +692,28 @@ def build_download_export(
                 "total_hours",
             ]
         ].sort_values(["report_month", "instructor_name"])
+
+    if dataset_key == "class_occupancy":
+        if occupancy is None or occupancy.empty:
+            return pd.DataFrame()
+        filtered = filter_class_date_range(occupancy, start, end)
+        filtered = _format_datetimes_for_csv(filtered, ["class_at"])
+        return filtered[
+            [
+                "class_name",
+                "class_at",
+                "class_date",
+                "class_time",
+                "instructor_name",
+                "location",
+                "capacity",
+                "bookings",
+                "check_ins",
+                "no_shows",
+                "late_cancellations",
+                "occupancy_pct",
+            ]
+        ].sort_values(["class_date", "class_at"])
 
     return pd.DataFrame()
 

@@ -81,6 +81,7 @@ def _run_downloads() -> None:
         st.session_state.get("dash_raw"),
         st.session_state.get("dash_expense_raw"),
         st.session_state.get("dash_instructor_raw"),
+        st.session_state.get("dash_occupancy_raw"),
     )
 
 

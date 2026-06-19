@@ -13,7 +13,7 @@ from dashboard.data import (
     load_total_sales_export,
     log_download_event,
 )
-from dashboard.shared import cached_all_expenses, client_request_meta, download_user_names
+from dashboard.shared import cached_all_expenses, cached_class_occupancy, client_request_meta, download_user_names
 
 
 def _download_filename(prefix: str, start: date, end: date) -> str:
@@ -58,6 +58,7 @@ def render(
     sales: pd.DataFrame | None,
     expenses: pd.DataFrame | None,
     instructors: pd.DataFrame | None,
+    occupancy: pd.DataFrame | None = None,
 ) -> None:
     st.title("Downloads")
     st.caption("Export CSV files for the date range and datasets you choose.")
@@ -65,11 +66,13 @@ def render(
     sales_export = _cached_sales_export()
     expenses_all = cached_all_expenses()
     instructors_export = instructors if instructors is not None else _cached_instructors_export()
+    occupancy_export = occupancy if occupancy is not None else cached_class_occupancy()
 
     min_date, max_date = combined_download_date_bounds(
         sales_export,
         expenses_all,
         instructors_export,
+        occupancy_export,
     )
 
     st.subheader("Export settings")
@@ -115,6 +118,7 @@ def render(
             sales_export=sales_export,
             expenses_all=expenses_all,
             instructors=instructors_export,
+            occupancy=occupancy_export,
         )
 
         st.markdown(f"**{meta['label']}**")

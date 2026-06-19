@@ -9,6 +9,7 @@ import streamlit as st
 from dashboard.data import (
     DAY_ORDER,
     filter_class_date_range,
+    format_studio_hour_label,
     occupancy_day_totals,
     occupancy_hour_totals,
     occupancy_timing_matrix,
@@ -48,7 +49,7 @@ def _heatmap(matrix: pd.DataFrame, value_col: str, title: str, kind: str) -> Non
         return
 
     hours = sorted(int(h) for h in matrix["class_hour"].unique())
-    hour_labels = [f"{h:02d}:00" for h in hours]
+    hour_labels = [format_studio_hour_label(h) for h in hours]
     z_rows: list[list[float]] = []
     y_labels: list[str] = []
 
@@ -111,7 +112,7 @@ def _bar_chart(
     value_col, y_label, kind = METRIC_CONFIG[metric]
     labels = df[x_col]
     if x_col == "class_hour":
-        labels = df[x_col].map(lambda h: f"{int(h):02d}:00")
+        labels = df[x_col].map(format_studio_hour_label)
 
     fig = go.Figure(
         go.Bar(
@@ -204,7 +205,7 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
         if not hours.empty:
             best = hours.loc[hours[value_col].idxmax()]
             st.caption(
-                f"Peak hour ({metric.lower()}): **{int(best['class_hour']):02d}:00** "
+                f"Peak hour ({metric.lower()}): **{format_studio_hour_label(int(best['class_hour']))}** "
                 f"({_format_value(metric, best[value_col])}, "
                 f"{int(best['class_sessions'])} classes)"
             )
