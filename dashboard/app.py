@@ -13,6 +13,7 @@ from dashboard.shared import (
     sidebar_header,
 )
 from dashboard.views.budget_vs_actuals import render as render_budget_vs_actuals
+from dashboard.views.budget_vs_actuals import render_model_budget
 from dashboard.views.downloads import render as render_downloads
 from dashboard.views.expenses import render as render_expenses
 from dashboard.views.instructors import render as render_instructors
@@ -89,6 +90,14 @@ def _run_budget_vs_actuals() -> None:
         budget,
         st.session_state.get("dash_expense_raw"),
     )
+
+
+def _run_model_budget() -> None:
+    budget = st.session_state.get("dash_budget_raw")
+    if budget is None or budget.empty:
+        st.warning("No financial model budget data found.")
+        return
+    render_model_budget(budget)
 
 
 def _run_downloads() -> None:
@@ -174,6 +183,12 @@ def main() -> None:
                 title="Budget vs Actuals",
                 icon="📈",
                 url_path="budget-vs-actuals",
+            ),
+            st.Page(
+                _run_model_budget,
+                title="Model Budget",
+                icon="📋",
+                url_path="model-budget",
             ),
             st.Page(
                 _run_downloads,

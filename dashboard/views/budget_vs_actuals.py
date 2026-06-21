@@ -507,8 +507,16 @@ def _render_comparison_tab(
     )
 
 
-def _render_model_budget_tab(budget: pd.DataFrame) -> None:
-    st.caption("Full financial model budget across all planned studio periods.")
+def render_model_budget(budget: pd.DataFrame) -> None:
+    st.title("Model Budget")
+    st.caption(
+        "Full financial model budget across all planned studio periods "
+        "(13th → 12th, from 13 May 2026)."
+    )
+
+    if budget.empty:
+        st.warning("No financial model periods found. Run `python3 scripts/run_financial_model_import.py`.")
+        return
 
     periods = enrich_budget_periods(budget)
     variable_df = build_budget_model_variable(budget)
@@ -559,41 +567,34 @@ def render(
         st.warning("No financial model periods found. Run `python3 scripts/run_financial_model_import.py`.")
         return
 
-    comparison_tab, model_budget_tab = st.tabs(["Budget vs Actuals", "Model Budget"])
-
-    with model_budget_tab:
-        _render_model_budget_tab(budget)
-
     instructor_df = instructors if instructors is not None else pd.DataFrame()
     expense_df = expenses if expenses is not None else pd.DataFrame()
     comparison = build_budget_vs_actuals(sales, instructor_df, budget)
+    if comparison.empty:
+        st.warning("Could not build budget comparison.")
+        return
 
-    with comparison_tab:
-        if comparison.empty:
-            st.warning("Could not build budget comparison.")
-            return
+    today = date.today()
+    started = comparison[comparison["period_start"] <= today].copy()
+    if started.empty:
+        st.info("No studio periods have started yet.")
+        return
 
-        today = date.today()
-        started = comparison[comparison["period_start"] <= today].copy()
-        if started.empty:
-            st.info("No studio periods have started yet.")
-            return
+    cumulative = add_cumulative_columns(started)
+    fixed_long = build_fixed_costs_comparison(expense_df, started)
+    fixed_cumulative = add_fixed_costs_cumulative(fixed_long)
 
-        cumulative = add_cumulative_columns(started)
-        fixed_long = build_fixed_costs_comparison(expense_df, started)
-        fixed_cumulative = add_fixed_costs_cumulative(fixed_long)
-
-        current_mask = (started["period_start"] <= today) & (started["period_end"] >= today)
-        if current_mask.any() and started.loc[current_mask, "period_end"].iloc[-1] >= today:
-            focus = started[current_mask].iloc[-1]
-            st.info(
-                f"**{focus['period_label']}** is in progress ({focus['period_range']}). "
-                "Actual figures for the current period are partial."
-            )
-
-        _render_comparison_tab(started, cumulative, fixed_long, fixed_cumulative)
-
-        st.caption(
-            "Revenue & margin: red if variance < −15%, orange −15% to −5%, green ≥ −5%. "
-            "Variable & fixed expenses: green < 5% over budget, orange 5–15%, red > 15%."
+    current_mask = (started["period_start"] <= today) & (started["period_end"] >= today)
+    if current_mask.any() and started.loc[current_mask, "period_end"].iloc[-1] >= today:
+        focus = started[current_mask].iloc[-1]
+        st.info(
+            f"**{focus['period_label']}** is in progress ({focus['period_range']}). "
+            "Actual figures for the current period are partial."
         )
+
+    _render_comparison_tab(started, cumulative, fixed_long, fixed_cumulative)
+
+    st.caption(
+        "Revenue & margin: red if variance < −15%, orange −15% to −5%, green ≥ −5%. "
+        "Variable & fixed expenses: green < 5% over budget, orange 5–15%, red > 15%."
+    )
