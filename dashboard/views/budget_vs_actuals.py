@@ -578,7 +578,7 @@ def _render_cumulative_net_profit_charts(cumulative: pd.DataFrame) -> None:
         )
 
     st.caption(
-        "Net profit = revenue − instructor fees − fixed operating expenses. "
+        "Net profit = gross profit − fixed operating expenses (EBITDA). "
         "Cumulative margin = cumulative net profit ÷ cumulative revenue."
     )
 
