@@ -12,6 +12,7 @@ import streamlit as st
 
 from dashboard.data import (
     load_class_occupancy,
+    load_financial_model_budget,
     load_instructor_performance,
     load_revolut_expenses,
     load_total_sales,
@@ -111,6 +112,11 @@ def cached_all_expenses() -> pd.DataFrame:
     return load_revolut_expenses(include_excluded=True)
 
 
+@st.cache_data(ttl=300, show_spinner="Loading financial model…")
+def cached_financial_model_budget() -> pd.DataFrame:
+    return load_financial_model_budget()
+
+
 def clear_expense_cache() -> None:
     cached_expenses.clear()
     cached_all_expenses.clear()
@@ -162,6 +168,17 @@ def load_expenses_or_error() -> pd.DataFrame | None:
     except Exception as exc:
         err = str(exc)
         st.error("Could not load Revolut expense data.")
+        with st.expander("Technical details"):
+            st.code(err)
+        return None
+
+
+def load_financial_model_or_error() -> pd.DataFrame | None:
+    try:
+        return cached_financial_model_budget()
+    except Exception as exc:
+        err = str(exc)
+        st.error("Could not load financial model budget data.")
         with st.expander("Technical details"):
             st.code(err)
         return None

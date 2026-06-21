@@ -5,12 +5,14 @@ import streamlit as st
 from dashboard.shared import (
     load_class_occupancy_or_error,
     load_expenses_or_error,
+    load_financial_model_or_error,
     load_instructor_or_error,
     load_sales_or_error,
     password_gate,
     sidebar_date_range,
     sidebar_header,
 )
+from dashboard.views.budget_vs_actuals import render as render_budget_vs_actuals
 from dashboard.views.downloads import render as render_downloads
 from dashboard.views.expenses import render as render_expenses
 from dashboard.views.instructors import render as render_instructors
@@ -76,6 +78,18 @@ def _run_expenses() -> None:
     )
 
 
+def _run_budget_vs_actuals() -> None:
+    budget = st.session_state.get("dash_budget_raw")
+    if budget is None or budget.empty:
+        st.warning("No financial model budget data found.")
+        return
+    render_budget_vs_actuals(
+        st.session_state["dash_raw"],
+        st.session_state.get("dash_instructor_raw"),
+        budget,
+    )
+
+
 def _run_downloads() -> None:
     render_downloads(
         st.session_state.get("dash_raw"),
@@ -113,6 +127,7 @@ def main() -> None:
     st.session_state["dash_instructor_raw"] = load_instructor_or_error()
     st.session_state["dash_expense_raw"] = expenses
     st.session_state["dash_occupancy_raw"] = occupancy
+    st.session_state["dash_budget_raw"] = load_financial_model_or_error()
 
     nav = st.navigation(
         [
@@ -152,6 +167,12 @@ def main() -> None:
                 title="Expense Tracking",
                 icon="💳",
                 url_path="expense-tracking",
+            ),
+            st.Page(
+                _run_budget_vs_actuals,
+                title="Budget vs Actuals",
+                icon="📈",
+                url_path="budget-vs-actuals",
             ),
             st.Page(
                 _run_downloads,

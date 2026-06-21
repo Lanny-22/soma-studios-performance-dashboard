@@ -797,3 +797,247 @@ def log_download_event(
         conn.commit()
 
     return None
+
+
+# Momence categories counted as operating revenue (class, membership, retail).
+BUDGET_REVENUE_CATEGORIES = ("Class", "Subscription", "Pack", "Product")
+
+FINANCIAL_MODEL_BUDGET_QUERY = """
+    SELECT
+        p.period_code,
+        p.period_label,
+        p.period_start,
+        p.period_end,
+        p.period_index,
+        r.class_membership_revenue,
+        r.inventory_revenue,
+        r.total_revenue,
+        s.instructor_fees,
+        s.gross_profit,
+        s.gross_margin_pct
+    FROM financial_model_periods p
+    JOIN financial_model_revenue r ON r.period_code = p.period_code
+    JOIN financial_model_summary s ON s.period_code = p.period_code
+    ORDER BY p.period_index
+"""
+
+
+def load_financial_model_budget() -> pd.DataFrame:
+    with get_conn() as conn:
+        rows = conn.execute(FINANCIAL_MODEL_BUDGET_QUERY).fetchall()
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    for col in (
+        "class_membership_revenue",
+        "inventory_revenue",
+        "total_revenue",
+        "instructor_fees",
+        "gross_profit",
+        "gross_margin_pct",
+    ):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["period_start"] = pd.to_datetime(df["period_start"]).dt.date
+    df["period_end"] = pd.to_datetime(df["period_end"]).dt.date
+    return df
+
+
+def _sales_payment_dates(df: pd.DataFrame) -> pd.Series:
+    return df["payment_at"].dt.tz_convert(STUDIO_TIMEZONE).dt.date
+
+
+def build_budget_vs_actuals(
+    sales: pd.DataFrame,
+    instructors: pd.DataFrame,
+    budget: pd.DataFrame,
+) -> pd.DataFrame:
+    """Join financial-model periods with Momence actual revenue and instructor pay."""
+    if budget.empty:
+        return pd.DataFrame()
+
+    revenue_sales = sales[sales["category"].isin(BUDGET_REVENUE_CATEGORIES)].copy()
+    if not revenue_sales.empty:
+        revenue_sales["payment_date"] = _sales_payment_dates(revenue_sales)
+
+    rows: list[dict] = []
+    for _, period in budget.iterrows():
+        start = period["period_start"]
+        end = period["period_end"]
+
+        if revenue_sales.empty:
+            actual_revenue = 0.0
+        else:
+            mask = (revenue_sales["payment_date"] >= start) & (
+                revenue_sales["payment_date"] <= end
+            )
+            actual_revenue = float(revenue_sales.loc[mask, "net_sales"].sum())
+
+        if instructors.empty:
+            actual_instructor = 0.0
+        else:
+            inst_mask = (instructors["class_date"] >= start) & (
+                instructors["class_date"] <= end
+            )
+            actual_instructor = float(
+                instructors.loc[inst_mask, "instructor_payout"].sum()
+            )
+
+        budget_revenue = float(period["total_revenue"])
+        budget_instructor = float(period["instructor_fees"])
+        budget_gross_profit = float(period["gross_profit"])
+        budget_margin = float(period["gross_margin_pct"])
+
+        actual_gross_profit = actual_revenue - actual_instructor
+        actual_margin = (
+            (actual_gross_profit / actual_revenue * 100) if actual_revenue > 0 else None
+        )
+
+        rows.append(
+            {
+                "period_code": period["period_code"],
+                "period_label": period["period_label"],
+                "period_start": start,
+                "period_end": end,
+                "period_range": f"{start:%d %b %Y} – {end:%d %b %Y}",
+                "budget_revenue": budget_revenue,
+                "actual_revenue": actual_revenue,
+                "revenue_variance": actual_revenue - budget_revenue,
+                "budget_instructor_fees": budget_instructor,
+                "actual_instructor_fees": actual_instructor,
+                "instructor_variance": actual_instructor - budget_instructor,
+                "budget_gross_profit": budget_gross_profit,
+                "actual_gross_profit": actual_gross_profit,
+                "budget_gross_margin_pct": budget_margin,
+                "actual_gross_margin_pct": actual_margin,
+                "margin_variance_pct": (
+                    actual_margin - budget_margin
+                    if actual_margin is not None
+                    else None
+                ),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+# Momence categories counted as operating revenue (class, membership, retail).
+BUDGET_REVENUE_CATEGORIES = ("Class", "Subscription", "Pack", "Product")
+
+FINANCIAL_MODEL_BUDGET_QUERY = """
+    SELECT
+        p.period_code,
+        p.period_label,
+        p.period_start,
+        p.period_end,
+        p.period_index,
+        r.class_membership_revenue,
+        r.inventory_revenue,
+        r.total_revenue,
+        s.instructor_fees,
+        s.gross_profit,
+        s.gross_margin_pct
+    FROM financial_model_periods p
+    JOIN financial_model_revenue r ON r.period_code = p.period_code
+    JOIN financial_model_summary s ON s.period_code = p.period_code
+    ORDER BY p.period_index
+"""
+
+
+def load_financial_model_budget() -> pd.DataFrame:
+    with get_conn() as conn:
+        rows = conn.execute(FINANCIAL_MODEL_BUDGET_QUERY).fetchall()
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    for col in (
+        "class_membership_revenue",
+        "inventory_revenue",
+        "total_revenue",
+        "instructor_fees",
+        "gross_profit",
+        "gross_margin_pct",
+    ):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["period_start"] = pd.to_datetime(df["period_start"]).dt.date
+    df["period_end"] = pd.to_datetime(df["period_end"]).dt.date
+    return df
+
+
+def _sales_payment_dates(df: pd.DataFrame) -> pd.Series:
+    return df["payment_at"].dt.tz_convert(STUDIO_TIMEZONE).dt.date
+
+
+def build_budget_vs_actuals(
+    sales: pd.DataFrame,
+    instructors: pd.DataFrame,
+    budget: pd.DataFrame,
+) -> pd.DataFrame:
+    """Join financial-model periods with Momence actual revenue and instructor pay."""
+    if budget.empty:
+        return pd.DataFrame()
+
+    revenue_sales = sales[sales["category"].isin(BUDGET_REVENUE_CATEGORIES)].copy()
+    if not revenue_sales.empty:
+        revenue_sales["payment_date"] = _sales_payment_dates(revenue_sales)
+
+    rows: list[dict] = []
+    for _, period in budget.iterrows():
+        start = period["period_start"]
+        end = period["period_end"]
+
+        if revenue_sales.empty:
+            actual_revenue = 0.0
+        else:
+            mask = (revenue_sales["payment_date"] >= start) & (
+                revenue_sales["payment_date"] <= end
+            )
+            actual_revenue = float(revenue_sales.loc[mask, "net_sales"].sum())
+
+        if instructors.empty:
+            actual_instructor = 0.0
+        else:
+            inst_mask = (instructors["class_date"] >= start) & (
+                instructors["class_date"] <= end
+            )
+            actual_instructor = float(
+                instructors.loc[inst_mask, "instructor_payout"].sum()
+            )
+
+        budget_revenue = float(period["total_revenue"])
+        budget_instructor = float(period["instructor_fees"])
+        budget_gross_profit = float(period["gross_profit"])
+        budget_margin = float(period["gross_margin_pct"])
+
+        actual_gross_profit = actual_revenue - actual_instructor
+        actual_margin = (
+            (actual_gross_profit / actual_revenue * 100) if actual_revenue > 0 else None
+        )
+
+        rows.append(
+            {
+                "period_code": period["period_code"],
+                "period_label": period["period_label"],
+                "period_start": start,
+                "period_end": end,
+                "period_range": f"{start:%d %b %Y} – {end:%d %b %Y}",
+                "budget_revenue": budget_revenue,
+                "actual_revenue": actual_revenue,
+                "revenue_variance": actual_revenue - budget_revenue,
+                "budget_instructor_fees": budget_instructor,
+                "actual_instructor_fees": actual_instructor,
+                "instructor_variance": actual_instructor - budget_instructor,
+                "budget_gross_profit": budget_gross_profit,
+                "actual_gross_profit": actual_gross_profit,
+                "budget_gross_margin_pct": budget_margin,
+                "actual_gross_margin_pct": actual_margin,
+                "margin_variance_pct": (
+                    actual_margin - budget_margin
+                    if actual_margin is not None
+                    else None
+                ),
+            }
+        )
+
+    return pd.DataFrame(rows)
