@@ -548,39 +548,54 @@ def _budget_actual_line_chart(
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
 
-def _render_cumulative_net_profit_charts(cumulative: pd.DataFrame) -> None:
-    _section_header("Cumulative Net Profit & Margin")
+def _render_net_profit_charts(started: pd.DataFrame, cumulative: pd.DataFrame) -> None:
+    _section_header("Net Profit & Margin")
 
+    view = st.radio(
+        "View",
+        ["Cumulative", "Marginal"],
+        horizontal=True,
+        key="net_profit_view",
+    )
     metric = st.radio(
         "Metric",
         ["Net profit", "Net margin"],
         horizontal=True,
-        key="cumulative_net_metric",
+        key="net_profit_metric",
     )
+
+    is_cumulative = view == "Cumulative"
+    source = cumulative if is_cumulative else started
 
     if metric == "Net profit":
         _budget_actual_line_chart(
-            cumulative,
-            title="Cumulative net profit",
-            budget_col="cum_budget_net_profit",
-            actual_col="cum_actual_net_profit",
-            y_title="Cumulative net profit (€)",
+            source,
+            title="Cumulative net profit" if is_cumulative else "Net profit by period",
+            budget_col="cum_budget_net_profit" if is_cumulative else "budget_net_profit",
+            actual_col="cum_actual_net_profit" if is_cumulative else "actual_net_profit",
+            y_title="Cumulative net profit (€)" if is_cumulative else "Net profit (€)",
             value_kind="eur",
         )
     else:
         _budget_actual_line_chart(
-            cumulative,
-            title="Cumulative net margin",
-            budget_col="cum_budget_net_margin_pct",
-            actual_col="cum_actual_net_margin_pct",
-            y_title="Cumulative net margin (%)",
+            source,
+            title="Cumulative net margin" if is_cumulative else "Net margin by period",
+            budget_col="cum_budget_net_margin_pct" if is_cumulative else "budget_net_margin_pct",
+            actual_col="cum_actual_net_margin_pct" if is_cumulative else "actual_net_margin_pct",
+            y_title="Cumulative net margin (%)" if is_cumulative else "Net margin (%)",
             value_kind="pct",
         )
 
-    st.caption(
-        "Net profit = gross profit − fixed operating expenses (EBITDA). "
-        "Cumulative margin = cumulative net profit ÷ cumulative revenue."
-    )
+    if is_cumulative:
+        st.caption(
+            "Net profit = gross profit − fixed operating expenses (EBITDA). "
+            "Cumulative margin = cumulative net profit ÷ cumulative revenue."
+        )
+    else:
+        st.caption(
+            "Net profit = gross profit − fixed operating expenses (EBITDA). "
+            "Marginal margin = period net profit ÷ period revenue."
+        )
 
 
 def _render_comparison_tab(
@@ -702,7 +717,7 @@ def render(
 
     st.divider()
 
-    _render_cumulative_net_profit_charts(cumulative)
+    _render_net_profit_charts(started, cumulative)
 
     st.caption(
         "Revenue & margin: red if variance < −15%, orange −15% to −5%, green ≥ −5%. "
