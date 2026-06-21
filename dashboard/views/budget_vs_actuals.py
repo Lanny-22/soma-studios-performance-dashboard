@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Callable
 
 import pandas as pd
 import streamlit as st
@@ -14,88 +15,81 @@ from dashboard.data import (
 )
 from dashboard.shared import EUR
 
+MetricFmt = Callable[[float | None], str]
+
 
 def _format_money(value: float | None) -> str:
     if value is None or pd.isna(value):
         return "—"
-    return EUR.format(value)
+    amount = float(value)
+    if abs(amount) >= 1000:
+        thousands = amount / 1000
+        if abs(thousands - round(thousands)) < 0.05:
+            return f"€{int(round(thousands)):,}k".replace(",", "")
+        return EUR.format(amount)
+    return EUR.format(amount)
 
 
 def _format_pct(value: float | None) -> str:
     if value is None or pd.isna(value):
         return "—"
-    return f"{value:.1f}%"
+    return f"{float(value):.0f}%"
 
 
-def _variance_money(actual: float, budget: float) -> str:
-    return _format_money(actual - budget)
+METRIC_ROWS: list[tuple[str, str, str, MetricFmt]] = [
+    ("Revenue", "actual_revenue", "budget_revenue", _format_money),
+    ("Instructor Fees", "actual_instructor_fees", "budget_instructor_fees", _format_money),
+    ("Gross Margin", "actual_gross_margin_pct", "budget_gross_margin_pct", _format_pct),
+]
+
+CUM_METRIC_ROWS: list[tuple[str, str, str, MetricFmt]] = [
+    ("Revenue", "cum_actual_revenue", "cum_budget_revenue", _format_money),
+    (
+        "Instructor Fees",
+        "cum_actual_instructor_fees",
+        "cum_budget_instructor_fees",
+        _format_money,
+    ),
+    (
+        "Gross Margin",
+        "cum_actual_gross_margin_pct",
+        "cum_budget_gross_margin_pct",
+        _format_pct,
+    ),
+]
 
 
-def _variance_pct(actual: float | None, budget: float) -> str:
-    if actual is None or pd.isna(actual):
-        return "—"
-    return f"{actual - budget:+.1f}pp"
+def _pivot_table(df: pd.DataFrame, metrics: list[tuple[str, str, str, MetricFmt]]) -> pd.DataFrame:
+    """Metrics down the side, periods across the top — Actual/Budget row pairs."""
+    period_codes = df["period_code"].tolist()
+    by_period = df.set_index("period_code")
+
+    rows: list[dict[str, str]] = []
+    for label, actual_col, budget_col, fmt in metrics:
+        actual_row: dict[str, str] = {"Metric": label, "": "Actual"}
+        budget_row: dict[str, str] = {"Metric": "", "": "Budget"}
+        for code in period_codes:
+            period = by_period.loc[code]
+            actual_row[code] = fmt(period[actual_col])
+            budget_row[code] = fmt(period[budget_col])
+        rows.extend([actual_row, budget_row])
+
+    table = pd.DataFrame(rows)
+    table = table[["Metric", ""] + period_codes]
+    table.columns = ["Metric", ""] + [
+        f"{code}\n{by_period.loc[code]['period_range']}" for code in period_codes
+    ]
+    return table
 
 
-def _monthly_table(df: pd.DataFrame) -> pd.DataFrame:
-    rows = []
-    for _, r in df.iterrows():
-        rows.append(
-            {
-                "Period": r["period_label"],
-                "Dates": r["period_range"],
-                "Budget revenue": _format_money(r["budget_revenue"]),
-                "Actual revenue": _format_money(r["actual_revenue"]),
-                "Revenue Δ": _variance_money(r["actual_revenue"], r["budget_revenue"]),
-                "Budget instructor": _format_money(r["budget_instructor_fees"]),
-                "Actual instructor": _format_money(r["actual_instructor_fees"]),
-                "Instructor Δ": _variance_money(
-                    r["actual_instructor_fees"], r["budget_instructor_fees"]
-                ),
-                "Budget gross profit": _format_money(r["budget_gross_profit"]),
-                "Actual gross profit": _format_money(r["actual_gross_profit"]),
-                "Gross profit Δ": _variance_money(
-                    r["actual_gross_profit"], r["budget_gross_profit"]
-                ),
-                "Budget margin": _format_pct(r["budget_gross_margin_pct"]),
-                "Actual margin": _format_pct(r["actual_gross_margin_pct"]),
-                "Margin Δ": _variance_pct(
-                    r["actual_gross_margin_pct"], r["budget_gross_margin_pct"]
-                ),
-            }
-        )
-    return pd.DataFrame(rows)
+def _style_pivot(table: pd.DataFrame):
+    def _metric_style(col: pd.Series) -> list[str]:
+        return [
+            "background-color: #f3f4f6; font-weight: 600" if value else ""
+            for value in col
+        ]
 
-
-def _cumulative_table(df: pd.DataFrame) -> pd.DataFrame:
-    rows = []
-    for _, r in df.iterrows():
-        rows.append(
-            {
-                "Through period": r["period_label"],
-                "Dates": r["period_range"],
-                "Budget revenue": _format_money(r["cum_budget_revenue"]),
-                "Actual revenue": _format_money(r["cum_actual_revenue"]),
-                "Revenue Δ": _variance_money(r["cum_actual_revenue"], r["cum_budget_revenue"]),
-                "Budget instructor": _format_money(r["cum_budget_instructor_fees"]),
-                "Actual instructor": _format_money(r["cum_actual_instructor_fees"]),
-                "Instructor Δ": _variance_money(
-                    r["cum_actual_instructor_fees"], r["cum_budget_instructor_fees"]
-                ),
-                "Budget gross profit": _format_money(r["cum_budget_gross_profit"]),
-                "Actual gross profit": _format_money(r["cum_actual_gross_profit"]),
-                "Gross profit Δ": _variance_money(
-                    r["cum_actual_gross_profit"], r["cum_budget_gross_profit"]
-                ),
-                "Budget margin": _format_pct(r["cum_budget_gross_margin_pct"]),
-                "Actual margin": _format_pct(r["cum_actual_gross_margin_pct"]),
-                "Margin Δ": _variance_pct(
-                    r["cum_actual_gross_margin_pct"],
-                    r["cum_budget_gross_margin_pct"],
-                ),
-            }
-        )
-    return pd.DataFrame(rows)
+    return table.style.apply(_metric_style, subset=["Metric"])
 
 
 def render(
@@ -133,25 +127,25 @@ def render(
         focus = started[current_mask].iloc[-1]
         st.info(
             f"**{focus['period_label']}** is in progress ({focus['period_range']}). "
-            "Actual figures for that row are partial."
+            "Actual figures for that period are partial."
         )
 
     monthly_tab, cumulative_tab = st.tabs(["Monthly by period", "Cumulative"])
 
     with monthly_tab:
         st.dataframe(
-            _monthly_table(started),
+            _style_pivot(_pivot_table(started, METRIC_ROWS)),
             use_container_width=True,
             hide_index=True,
         )
 
     with cumulative_tab:
         st.caption(
-            "Running totals from launch through each period end. "
-            "Margin = cumulative gross profit ÷ cumulative revenue."
+            "Running totals through each period end. "
+            "Gross margin = cumulative gross profit ÷ cumulative revenue."
         )
         st.dataframe(
-            _cumulative_table(cumulative),
+            _style_pivot(_pivot_table(cumulative, CUM_METRIC_ROWS)),
             use_container_width=True,
             hide_index=True,
         )
