@@ -843,6 +843,41 @@ def load_financial_model_budget() -> pd.DataFrame:
     return df
 
 
+def enrich_budget_periods(budget: pd.DataFrame) -> pd.DataFrame:
+    df = budget.sort_values("period_index").copy()
+    df["period_range"] = df.apply(
+        lambda row: f"{row['period_start']:%d %b %Y} – {row['period_end']:%d %b %Y}",
+        axis=1,
+    )
+    return df
+
+
+def build_budget_model_variable(budget: pd.DataFrame) -> pd.DataFrame:
+    df = enrich_budget_periods(budget)
+    return df.rename(
+        columns={
+            "total_revenue": "budget_revenue",
+            "instructor_fees": "budget_instructor_fees",
+            "gross_profit": "budget_gross_profit",
+            "gross_margin_pct": "budget_gross_margin_pct",
+        }
+    )
+
+
+def add_budget_model_cumulative(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    out = df.sort_values("period_index").copy()
+    out["cum_budget_revenue"] = out["budget_revenue"].cumsum()
+    out["cum_budget_instructor_fees"] = out["budget_instructor_fees"].cumsum()
+    out["cum_budget_gross_profit"] = out["budget_gross_profit"].cumsum()
+    out["cum_budget_gross_margin_pct"] = (
+        out["cum_budget_gross_profit"] / out["cum_budget_revenue"].replace(0, pd.NA) * 100
+    )
+    return out
+
+
 def _sales_payment_dates(df: pd.DataFrame) -> pd.Series:
     return df["payment_at"].dt.tz_convert(STUDIO_TIMEZONE).dt.date
 
@@ -1076,6 +1111,62 @@ def build_fixed_costs_comparison(
         )
 
     return pd.DataFrame(rows)
+
+
+def build_fixed_costs_budget_long(periods: pd.DataFrame) -> pd.DataFrame:
+    """Budget-only fixed OPEX from the financial model (all model periods)."""
+    if periods.empty:
+        return pd.DataFrame()
+
+    budget = load_financial_model_fixed_expenses()
+    if budget.empty:
+        return pd.DataFrame()
+
+    rows: list[dict] = []
+    for _, period in periods.sort_values("period_index").iterrows():
+        code = period["period_code"]
+        period_index = int(period["period_index"])
+        period_range = period["period_range"]
+        period_budget = budget[budget["period_code"] == code]
+
+        total_budget = 0.0
+        for category in FIXED_COST_CATEGORY_ORDER:
+            budget_rows = period_budget[period_budget["category"] == category]
+            budget_amt = float(budget_rows["amount"].fillna(0).sum())
+            total_budget += budget_amt
+            rows.append(
+                {
+                    "period_code": code,
+                    "period_index": period_index,
+                    "period_range": period_range,
+                    "category": category,
+                    "budget_amount": budget_amt,
+                }
+            )
+
+        rows.append(
+            {
+                "period_code": code,
+                "period_index": period_index,
+                "period_range": period_range,
+                "category": TOTAL_FIXED_EXPENSES_LABEL,
+                "budget_amount": total_budget,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def add_fixed_costs_budget_cumulative(long_df: pd.DataFrame) -> pd.DataFrame:
+    if long_df.empty:
+        return long_df
+
+    parts: list[pd.DataFrame] = []
+    for category in long_df["category"].unique():
+        part = long_df[long_df["category"] == category].sort_values("period_index").copy()
+        part["cum_budget_amount"] = part["budget_amount"].cumsum()
+        parts.append(part)
+    return pd.concat(parts, ignore_index=True)
 
 
 def add_fixed_costs_cumulative(long_df: pd.DataFrame) -> pd.DataFrame:

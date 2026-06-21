@@ -13,17 +13,22 @@ from dashboard.data import (
     BUDGET_REVENUE_CATEGORIES,
     FIXED_COST_CATEGORY_ORDER,
     TOTAL_FIXED_EXPENSES_LABEL,
+    add_budget_model_cumulative,
     add_cumulative_columns,
+    add_fixed_costs_budget_cumulative,
     add_fixed_costs_cumulative,
+    build_budget_model_variable,
     build_budget_vs_actuals,
+    build_fixed_costs_budget_long,
     build_fixed_costs_comparison,
+    enrich_budget_periods,
 )
-from dashboard.shared import EUR
 
 MetricFmt = Callable[[float | None], str]
 VarianceKind = Literal["revenue", "expense", "margin"]
 
 FIXED_GRANULAR_KEY = "budget_fixed_granular"
+MODEL_FIXED_GRANULAR_KEY = "budget_model_fixed_granular"
 
 GREEN_BG = "background-color: #dcfce7"
 ORANGE_BG = "background-color: #ffedd5"
@@ -50,16 +55,17 @@ class MetricSpec:
     use_margin_points: bool = False
 
 
+@dataclass(frozen=True)
+class BudgetOnlySpec:
+    label: str
+    col: str
+    fmt: MetricFmt
+
+
 def _format_money(value: float | None) -> str:
     if value is None or pd.isna(value):
         return "—"
-    amount = float(value)
-    if abs(amount) >= 1000:
-        thousands = amount / 1000
-        if abs(thousands - round(thousands)) < 0.05:
-            return f"€{int(round(thousands)):,}k".replace(",", "")
-        return EUR.format(amount)
-    return EUR.format(amount)
+    return f"€{int(round(float(value))):,}"
 
 
 def _format_pct(value: float | None) -> str:
@@ -143,6 +149,18 @@ VARIABLE_CUM_METRIC_SPECS: list[MetricSpec] = [
     ),
 ]
 
+BUDGET_ONLY_VARIABLE_SPECS: list[BudgetOnlySpec] = [
+    BudgetOnlySpec("Revenue", "budget_revenue", _format_money),
+    BudgetOnlySpec("Instructor Fees", "budget_instructor_fees", _format_money),
+    BudgetOnlySpec("Gross Margin", "budget_gross_margin_pct", _format_pct),
+]
+
+BUDGET_ONLY_CUM_VARIABLE_SPECS: list[BudgetOnlySpec] = [
+    BudgetOnlySpec("Revenue", "cum_budget_revenue", _format_money),
+    BudgetOnlySpec("Instructor Fees", "cum_budget_instructor_fees", _format_money),
+    BudgetOnlySpec("Gross Margin", "cum_budget_gross_margin_pct", _format_pct),
+]
+
 
 @dataclass
 class PivotRow:
@@ -204,6 +222,26 @@ def _build_pivot_rows(
     return table, pivot_rows
 
 
+def _build_budget_only_pivot(
+    df: pd.DataFrame,
+    specs: list[BudgetOnlySpec],
+) -> pd.DataFrame:
+    period_codes = df["period_code"].tolist()
+    by_period = df.set_index("period_code")
+    period_headers = [
+        f"{code}\n{by_period.loc[code]['period_range']}" for code in period_codes
+    ]
+
+    rows: list[dict[str, str]] = []
+    for spec in specs:
+        cells: dict[str, str] = {"Metric": spec.label}
+        for code, header in zip(period_codes, period_headers):
+            cells[header] = spec.fmt(by_period.loc[code][spec.col])
+        rows.append(cells)
+
+    return pd.DataFrame(rows)
+
+
 def _build_pivot_from_long(
     long_df: pd.DataFrame,
     categories: list[str],
@@ -260,6 +298,34 @@ def _build_pivot_from_long(
     return pd.DataFrame([row.cells for row in pivot_rows]), pivot_rows
 
 
+def _build_budget_only_from_long(
+    long_df: pd.DataFrame,
+    categories: list[str],
+    *,
+    cumulative: bool = False,
+) -> pd.DataFrame:
+    budget_col = "cum_budget_amount" if cumulative else "budget_amount"
+
+    period_meta = long_df.sort_values("period_index").drop_duplicates("period_code")
+    period_codes = period_meta["period_code"].tolist()
+    period_headers = [
+        f"{row.period_code}\n{row.period_range}" for row in period_meta.itertuples()
+    ]
+    indexed = long_df.set_index(["period_code", "category"])
+
+    rows: list[dict[str, str]] = []
+    for category in categories:
+        cells: dict[str, str] = {"Metric": category}
+        for code, header in zip(period_codes, period_headers):
+            if (code, category) not in indexed.index:
+                cells[header] = "—"
+                continue
+            cells[header] = _format_money(float(indexed.loc[(code, category)][budget_col]))
+        rows.append(cells)
+
+    return pd.DataFrame(rows)
+
+
 def _style_pivot(table: pd.DataFrame, pivot_rows: list[PivotRow]):
     period_cols = [col for col in table.columns if col not in ("Metric", "")]
 
@@ -286,9 +352,23 @@ def _style_pivot(table: pd.DataFrame, pivot_rows: list[PivotRow]):
     return table.style.apply(_row_style, axis=1)
 
 
+def _style_budget_only(table: pd.DataFrame):
+    def _row_style(_row: pd.Series) -> list[str]:
+        styles = [""] * len(_row)
+        styles[_row.index.get_loc("Metric")] = METRIC_BG
+        return styles
+
+    return table.style.apply(_row_style, axis=1)
+
+
 def _show_pivot_table(df: pd.DataFrame, specs: list[MetricSpec]) -> None:
     table, meta = _build_pivot_rows(df, specs)
     st.dataframe(_style_pivot(table, meta), use_container_width=True, hide_index=True)
+
+
+def _show_budget_only_table(df: pd.DataFrame, specs: list[BudgetOnlySpec]) -> None:
+    table = _build_budget_only_pivot(df, specs)
+    st.dataframe(_style_budget_only(table), use_container_width=True, hide_index=True)
 
 
 def _show_pivot_from_long(
@@ -299,6 +379,16 @@ def _show_pivot_from_long(
 ) -> None:
     table, meta = _build_pivot_from_long(long_df, categories, cumulative=cumulative)
     st.dataframe(_style_pivot(table, meta), use_container_width=True, hide_index=True)
+
+
+def _show_budget_only_from_long(
+    long_df: pd.DataFrame,
+    categories: list[str],
+    *,
+    cumulative: bool = False,
+) -> None:
+    table = _build_budget_only_from_long(long_df, categories, cumulative=cumulative)
+    st.dataframe(_style_budget_only(table), use_container_width=True, hide_index=True)
 
 
 def _section_header(title: str) -> None:
@@ -325,15 +415,16 @@ def _render_fixed_section(
     fixed_cumulative: pd.DataFrame,
     *,
     cumulative: bool = False,
+    granular_key: str = FIXED_GRANULAR_KEY,
 ) -> None:
     _section_header("Fixed Costs Overview")
 
-    granular = st.session_state.get(FIXED_GRANULAR_KEY, False)
+    granular = st.session_state.get(granular_key, False)
     if st.button(
         "Show line-item detail" if not granular else "Show total only",
-        key=f"fixed_granular_{'cum' if cumulative else 'monthly'}",
+        key=f"fixed_granular_{granular_key}_{'cum' if cumulative else 'monthly'}",
     ):
-        st.session_state[FIXED_GRANULAR_KEY] = not granular
+        st.session_state[granular_key] = not granular
         st.rerun()
 
     if fixed_long.empty:
@@ -355,6 +446,103 @@ def _render_fixed_section(
     )
 
 
+def _render_fixed_budget_only_section(
+    fixed_long: pd.DataFrame,
+    fixed_cumulative: pd.DataFrame,
+    *,
+    cumulative: bool = False,
+) -> None:
+    _section_header("Fixed Costs Overview")
+
+    granular = st.session_state.get(MODEL_FIXED_GRANULAR_KEY, False)
+    if st.button(
+        "Show line-item detail" if not granular else "Show total only",
+        key=f"model_fixed_granular_{'cum' if cumulative else 'monthly'}",
+    ):
+        st.session_state[MODEL_FIXED_GRANULAR_KEY] = not granular
+        st.rerun()
+
+    if fixed_long.empty:
+        st.warning("No fixed-cost budget data found.")
+        return
+
+    if granular:
+        categories = [
+            c for c in FIXED_COST_CATEGORY_ORDER if c in fixed_long["category"].unique()
+        ]
+    else:
+        categories = [TOTAL_FIXED_EXPENSES_LABEL]
+
+    source = fixed_cumulative if cumulative else fixed_long
+    _show_budget_only_from_long(source, categories, cumulative=cumulative)
+    st.caption("Budget from financial model (all planned periods).")
+
+
+def _render_comparison_tab(
+    started: pd.DataFrame,
+    cumulative: pd.DataFrame,
+    fixed_long: pd.DataFrame,
+    fixed_cumulative: pd.DataFrame,
+) -> None:
+    var_monthly_tab, var_cumulative_tab = st.tabs(["Monthly by period", "Cumulative"])
+
+    with var_monthly_tab:
+        _render_variable_section(started)
+
+    with var_cumulative_tab:
+        _render_variable_section_cumulative(cumulative)
+
+    st.divider()
+
+    fixed_view = st.radio(
+        "Fixed costs view",
+        ["Monthly by period", "Cumulative"],
+        horizontal=True,
+        key="comparison_fixed_costs_view",
+    )
+    _render_fixed_section(
+        fixed_long,
+        fixed_cumulative,
+        cumulative=fixed_view == "Cumulative",
+    )
+
+
+def _render_model_budget_tab(budget: pd.DataFrame) -> None:
+    st.caption("Full financial model budget across all planned studio periods.")
+
+    periods = enrich_budget_periods(budget)
+    variable_df = build_budget_model_variable(budget)
+    variable_cumulative = add_budget_model_cumulative(variable_df)
+    fixed_long = build_fixed_costs_budget_long(periods)
+    fixed_cumulative = add_fixed_costs_budget_cumulative(fixed_long)
+
+    var_monthly_tab, var_cumulative_tab = st.tabs(["Monthly by period", "Cumulative"])
+
+    with var_monthly_tab:
+        _section_header("Revenue less Variable Costs Overview")
+        _show_budget_only_table(variable_df, BUDGET_ONLY_VARIABLE_SPECS)
+        st.caption("Budget from financial model.")
+
+    with var_cumulative_tab:
+        _section_header("Revenue less Variable Costs Overview")
+        _show_budget_only_table(variable_cumulative, BUDGET_ONLY_CUM_VARIABLE_SPECS)
+        st.caption("Running budget totals through each period end.")
+
+    st.divider()
+
+    fixed_view = st.radio(
+        "Fixed costs view",
+        ["Monthly by period", "Cumulative"],
+        horizontal=True,
+        key="model_fixed_costs_view",
+    )
+    _render_fixed_budget_only_section(
+        fixed_long,
+        fixed_cumulative,
+        cumulative=fixed_view == "Cumulative",
+    )
+
+
 def render(
     sales: pd.DataFrame,
     instructors: pd.DataFrame | None,
@@ -371,44 +559,41 @@ def render(
         st.warning("No financial model periods found. Run `python3 scripts/run_financial_model_import.py`.")
         return
 
+    comparison_tab, model_budget_tab = st.tabs(["Budget vs Actuals", "Model Budget"])
+
+    with model_budget_tab:
+        _render_model_budget_tab(budget)
+
     instructor_df = instructors if instructors is not None else pd.DataFrame()
     expense_df = expenses if expenses is not None else pd.DataFrame()
     comparison = build_budget_vs_actuals(sales, instructor_df, budget)
-    if comparison.empty:
-        st.warning("Could not build budget comparison.")
-        return
 
-    today = date.today()
-    started = comparison[comparison["period_start"] <= today].copy()
-    if started.empty:
-        st.info("No studio periods have started yet.")
-        return
+    with comparison_tab:
+        if comparison.empty:
+            st.warning("Could not build budget comparison.")
+            return
 
-    cumulative = add_cumulative_columns(started)
-    fixed_long = build_fixed_costs_comparison(expense_df, started)
-    fixed_cumulative = add_fixed_costs_cumulative(fixed_long)
+        today = date.today()
+        started = comparison[comparison["period_start"] <= today].copy()
+        if started.empty:
+            st.info("No studio periods have started yet.")
+            return
 
-    current_mask = (started["period_start"] <= today) & (started["period_end"] >= today)
-    if current_mask.any() and started.loc[current_mask, "period_end"].iloc[-1] >= today:
-        focus = started[current_mask].iloc[-1]
-        st.info(
-            f"**{focus['period_label']}** is in progress ({focus['period_range']}). "
-            "Actual figures for the current period are partial."
+        cumulative = add_cumulative_columns(started)
+        fixed_long = build_fixed_costs_comparison(expense_df, started)
+        fixed_cumulative = add_fixed_costs_cumulative(fixed_long)
+
+        current_mask = (started["period_start"] <= today) & (started["period_end"] >= today)
+        if current_mask.any() and started.loc[current_mask, "period_end"].iloc[-1] >= today:
+            focus = started[current_mask].iloc[-1]
+            st.info(
+                f"**{focus['period_label']}** is in progress ({focus['period_range']}). "
+                "Actual figures for the current period are partial."
+            )
+
+        _render_comparison_tab(started, cumulative, fixed_long, fixed_cumulative)
+
+        st.caption(
+            "Revenue & margin: red if variance < −15%, orange −15% to −5%, green ≥ −5%. "
+            "Variable & fixed expenses: green < 5% over budget, orange 5–15%, red > 15%."
         )
-
-    monthly_tab, cumulative_tab = st.tabs(["Monthly by period", "Cumulative"])
-
-    with monthly_tab:
-        _render_variable_section(started)
-        st.divider()
-        _render_fixed_section(fixed_long, fixed_cumulative, cumulative=False)
-
-    with cumulative_tab:
-        _render_variable_section_cumulative(cumulative)
-        st.divider()
-        _render_fixed_section(fixed_long, fixed_cumulative, cumulative=True)
-
-    st.caption(
-        "Revenue & margin: red if variance < −15%, orange −15% to −5%, green ≥ −5%. "
-        "Variable & fixed expenses: green < 5% over budget, orange 5–15%, red > 15%."
-    )
