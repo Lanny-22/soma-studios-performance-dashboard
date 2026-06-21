@@ -24,6 +24,8 @@ from dashboard.data import (
     build_fixed_costs_budget_long,
     build_fixed_costs_comparison,
     enrich_budget_periods,
+    sum_pre_opening_expenses,
+    sum_pre_opening_revenue,
 )
 from dashboard.shared import CHART_HEIGHT, GREEN, GREEN_LIGHT, PLOTLY_CONFIG
 
@@ -548,7 +550,23 @@ def _budget_actual_line_chart(
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
 
-def _render_net_profit_charts(started: pd.DataFrame, cumulative: pd.DataFrame) -> None:
+def _pre_opening_note(sales: pd.DataFrame, expenses: pd.DataFrame) -> str:
+    presale_revenue = sum_pre_opening_revenue(sales)
+    pre_opening_expenses = sum_pre_opening_expenses(expenses)
+    return (
+        "Budget vs actuals on this page exclude **presale revenue** and **pre-opening expenses** "
+        "incurred to complete works on the premises (before 10 May 2026). "
+        f"Presale revenue excluded: **{_format_money(presale_revenue)}**. "
+        f"Pre-opening expenses excluded: **{_format_money(pre_opening_expenses)}**."
+    )
+
+
+def _render_net_profit_charts(
+    started: pd.DataFrame,
+    cumulative: pd.DataFrame,
+    sales: pd.DataFrame,
+    expenses: pd.DataFrame,
+) -> None:
     _section_header("Net Profit & Margin")
 
     view = st.radio(
@@ -596,6 +614,8 @@ def _render_net_profit_charts(started: pd.DataFrame, cumulative: pd.DataFrame) -
             "Net profit = gross profit − fixed operating expenses (EBITDA). "
             "Marginal margin = period net profit ÷ period revenue."
         )
+
+    st.caption(_pre_opening_note(sales, expenses))
 
 
 def _render_comparison_tab(
@@ -680,7 +700,9 @@ def render(
     st.title("Budget vs Actuals")
     st.caption(
         "Financial model vs actuals by **studio period** (13th → 12th, from 13 May 2026). "
-        f"Revenue = {', '.join(BUDGET_REVENUE_CATEGORIES)} net sales."
+        f"Revenue = {', '.join(BUDGET_REVENUE_CATEGORIES)} net sales. "
+        "Excludes presale revenue and pre-opening premises costs before 10 May 2026 "
+        "(see totals at the bottom of the page)."
     )
 
     if budget.empty:
@@ -717,7 +739,7 @@ def render(
 
     st.divider()
 
-    _render_net_profit_charts(started, cumulative)
+    _render_net_profit_charts(started, cumulative, sales, expense_df)
 
     st.caption(
         "Revenue & margin: red if variance < −15%, orange −15% to −5%, green ≥ −5%. "

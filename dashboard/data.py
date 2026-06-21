@@ -802,6 +802,9 @@ def log_download_event(
 # Momence categories counted as operating revenue (class, membership, retail).
 BUDGET_REVENUE_CATEGORIES = ("Class", "Subscription", "Pack", "Product")
 
+# Presale / pre-opening activity before studio periods (13 May 2026 launch).
+PRE_OPENING_CUTOFF = date(2026, 5, 10)
+
 FINANCIAL_MODEL_BUDGET_QUERY = """
     SELECT
         p.period_code,
@@ -886,6 +889,33 @@ def add_budget_model_cumulative(df: pd.DataFrame) -> pd.DataFrame:
 
 def _sales_payment_dates(df: pd.DataFrame) -> pd.Series:
     return df["payment_at"].dt.tz_convert(STUDIO_TIMEZONE).dt.date
+
+
+def sum_pre_opening_revenue(sales: pd.DataFrame) -> float:
+    """Presale and other operating revenue received before PRE_OPENING_CUTOFF."""
+    if sales.empty:
+        return 0.0
+
+    revenue = sales[sales["category"].isin(BUDGET_REVENUE_CATEGORIES)].copy()
+    if revenue.empty:
+        return 0.0
+
+    payment_dates = _sales_payment_dates(revenue)
+    mask = payment_dates < PRE_OPENING_CUTOFF
+    return float(revenue.loc[mask, "net_sales"].sum())
+
+
+def sum_pre_opening_expenses(expenses: pd.DataFrame) -> float:
+    """Pre-opening spend (premises works, etc.) before PRE_OPENING_CUTOFF."""
+    if expenses.empty:
+        return 0.0
+
+    rows = expenses[~expenses["manually_excluded"].fillna(False)].copy()
+    if rows.empty:
+        return 0.0
+
+    mask = rows["expense_date"] < PRE_OPENING_CUTOFF
+    return float(rows.loc[mask, "spend"].sum())
 
 
 def build_budget_vs_actuals(
