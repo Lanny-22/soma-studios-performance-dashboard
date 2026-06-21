@@ -23,6 +23,15 @@ GREEN_BG = "background-color: #dcfce7"
 ORANGE_BG = "background-color: #ffedd5"
 RED_BG = "background-color: #fee2e2"
 METRIC_BG = "background-color: #f3f4f6; font-weight: 600"
+VARIANCE_ROW_STYLE = (
+    "font-weight: 700; "
+    "border-top: 2px solid #6b7280; "
+    "border-bottom: 2px solid #6b7280"
+)
+
+
+def _join_styles(*parts: str) -> str:
+    return "; ".join(part for part in parts if part)
 
 
 @dataclass(frozen=True)
@@ -73,14 +82,13 @@ def _format_variance_pp(actual: float, budget: float) -> tuple[str, float | None
 
 
 def _variance_color(value: float | None, kind: VarianceKind) -> str:
-    """Revenue/margin: higher is better. Expense: lower spend vs budget is better."""
     if value is None or pd.isna(value):
         return ""
 
     if kind == "expense":
-        if value < -15:
+        if value < 5:
             return GREEN_BG
-        if value < -5:
+        if value <= 15:
             return ORANGE_BG
         return RED_BG
 
@@ -195,14 +203,19 @@ def _style_pivot(table: pd.DataFrame, pivot_rows: list[PivotRow]):
         styles = [""] * len(row)
         if meta.row_type == "actual" and meta.metric_label:
             styles[row.index.get_loc("Metric")] = METRIC_BG
-        if meta.row_type == "variance" and meta.variance_values:
-            for col in period_cols:
-                color = _variance_color(
-                    meta.variance_values.get(col),
-                    meta.variance_kind or "revenue",
-                )
-                if color:
-                    styles[row.index.get_loc(col)] = color
+        if meta.row_type == "variance":
+            for idx in range(len(row)):
+                cell_style = VARIANCE_ROW_STYLE
+                col = row.index[idx]
+                if col in period_cols and meta.variance_values:
+                    cell_style = _join_styles(
+                        cell_style,
+                        _variance_color(
+                            meta.variance_values.get(col),
+                            meta.variance_kind or "revenue",
+                        ),
+                    )
+                styles[idx] = cell_style
         return styles
 
     return table.style.apply(_row_style, axis=1)
@@ -272,5 +285,5 @@ def render(
 
     st.caption(
         "Revenue & margin: red if variance < −15%, orange −15% to −5%, green ≥ −5%. "
-        "Instructor fees (inverted): green < −15%, orange −15% to −5%, red ≥ −5%."
+        "Instructor fees: green < 5% over budget, orange 5–15%, red > 15%."
     )
