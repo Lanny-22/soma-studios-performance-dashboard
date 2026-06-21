@@ -951,3 +951,141 @@ def add_cumulative_columns(df: pd.DataFrame) -> pd.DataFrame:
         out["cum_actual_gross_margin_pct"] - out["cum_budget_gross_margin_pct"]
     )
     return out
+
+
+TOTAL_FIXED_EXPENSES_LABEL = "Total Fixed Expenses"
+
+FIXED_COST_CATEGORY_ORDER = [
+    "Rent",
+    "IT Subscriptions",
+    "Water & Electricity",
+    "Cleaning & Maintenance",
+    "Accountancy Fees",
+    "Audit Fees",
+    "Professional Fees",
+    "Meals & Entertainment",
+    "Membership & Sub Fees",
+    "Telephone & Telecoms",
+    "Travel Expenses",
+    "Other Admin / Misc",
+    "Class Materials",
+    "Condominium Fees",
+    "Insurance",
+    "Director 1 Salary",
+    "Director 2 Salary",
+    "Advertising & Promotion",
+]
+
+FINANCIAL_MODEL_FIXED_EXPENSES_QUERY = """
+    SELECT
+        e.period_code,
+        p.period_index,
+        p.period_start,
+        p.period_end,
+        e.category,
+        e.amount
+    FROM financial_model_expenses e
+    JOIN financial_model_periods p ON p.period_code = e.period_code
+    WHERE e.expense_type = 'fixed'
+    ORDER BY p.period_index, e.category
+"""
+
+
+def load_financial_model_fixed_expenses() -> pd.DataFrame:
+    with get_conn() as conn:
+        rows = conn.execute(FINANCIAL_MODEL_FIXED_EXPENSES_QUERY).fetchall()
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
+    df["period_start"] = pd.to_datetime(df["period_start"]).dt.date
+    df["period_end"] = pd.to_datetime(df["period_end"]).dt.date
+    return df
+
+
+def build_fixed_costs_comparison(
+    expenses: pd.DataFrame,
+    periods: pd.DataFrame,
+) -> pd.DataFrame:
+    """Long-format fixed OPEX: budget (model) vs actual (Revolut) per period and category."""
+    if periods.empty:
+        return pd.DataFrame()
+
+    budget = load_financial_model_fixed_expenses()
+    if budget.empty:
+        return pd.DataFrame()
+
+    expense_rows = expenses.copy()
+    if not expense_rows.empty:
+        expense_rows = expense_rows[~expense_rows["manually_excluded"].fillna(False)]
+
+    rows: list[dict] = []
+    for _, period in periods.sort_values("period_index").iterrows():
+        start = period["period_start"]
+        end = period["period_end"]
+        code = period["period_code"]
+        period_range = period["period_range"]
+        period_index = int(period["period_index"])
+
+        period_budget = budget[budget["period_code"] == code]
+        if expense_rows.empty:
+            period_actual = pd.DataFrame()
+        else:
+            period_actual = expense_rows[
+                (expense_rows["expense_date"] >= start)
+                & (expense_rows["expense_date"] <= end)
+            ]
+
+        total_budget = 0.0
+        total_actual = 0.0
+
+        for category in FIXED_COST_CATEGORY_ORDER:
+            budget_rows = period_budget[period_budget["category"] == category]
+            budget_amt = float(budget_rows["amount"].fillna(0).sum())
+
+            if period_actual.empty:
+                actual_amt = 0.0
+            else:
+                actual_amt = float(
+                    period_actual.loc[period_actual["label"] == category, "spend"].sum()
+                )
+
+            total_budget += budget_amt
+            total_actual += actual_amt
+            rows.append(
+                {
+                    "period_code": code,
+                    "period_index": period_index,
+                    "period_range": period_range,
+                    "category": category,
+                    "budget_amount": budget_amt,
+                    "actual_amount": actual_amt,
+                }
+            )
+
+        rows.append(
+            {
+                "period_code": code,
+                "period_index": period_index,
+                "period_range": period_range,
+                "category": TOTAL_FIXED_EXPENSES_LABEL,
+                "budget_amount": total_budget,
+                "actual_amount": total_actual,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def add_fixed_costs_cumulative(long_df: pd.DataFrame) -> pd.DataFrame:
+    if long_df.empty:
+        return long_df
+
+    parts: list[pd.DataFrame] = []
+    for category in long_df["category"].unique():
+        part = long_df[long_df["category"] == category].sort_values("period_index").copy()
+        part["cum_budget_amount"] = part["budget_amount"].cumsum()
+        part["cum_actual_amount"] = part["actual_amount"].cumsum()
+        parts.append(part)
+    return pd.concat(parts, ignore_index=True)

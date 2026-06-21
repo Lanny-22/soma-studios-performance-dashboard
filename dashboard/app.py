@@ -87,6 +87,7 @@ def _run_budget_vs_actuals() -> None:
         st.session_state["dash_raw"],
         st.session_state.get("dash_instructor_raw"),
         budget,
+        st.session_state.get("dash_expense_raw"),
     )
 
 
