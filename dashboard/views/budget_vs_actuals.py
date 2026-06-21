@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Callable, Literal
 
+import plotly.graph_objects as go
 import pandas as pd
 import streamlit as st
 
@@ -17,12 +18,14 @@ from dashboard.data import (
     add_cumulative_columns,
     add_fixed_costs_budget_cumulative,
     add_fixed_costs_cumulative,
+    attach_actual_net_profit,
     build_budget_model_variable,
     build_budget_vs_actuals,
     build_fixed_costs_budget_long,
     build_fixed_costs_comparison,
     enrich_budget_periods,
 )
+from dashboard.shared import CHART_HEIGHT, GREEN, GREEN_LIGHT, PLOTLY_CONFIG
 
 MetricFmt = Callable[[float | None], str]
 VarianceKind = Literal["revenue", "expense", "margin"]
@@ -478,6 +481,129 @@ def _render_fixed_budget_only_section(
     st.caption("Budget from financial model (all planned periods).")
 
 
+VARIANCE_BAR_OPACITY = 0.35
+
+
+def _period_axis_labels(df: pd.DataFrame) -> list[str]:
+    return [f"{row.period_code}" for row in df.itertuples()]
+
+
+def _combo_budget_actual_chart(
+    df: pd.DataFrame,
+    *,
+    title: str,
+    budget_col: str,
+    actual_col: str,
+    variance_col: str,
+    y_title: str,
+    value_kind: Literal["eur", "pct"],
+) -> None:
+    if df.empty:
+        return
+
+    x = _period_axis_labels(df)
+    budget = df[budget_col].astype(float)
+    actual = df[actual_col].astype(float)
+    variance = df[variance_col].astype(float)
+
+    if value_kind == "eur":
+        budget_hover = budget.map(lambda v: f"€{int(round(v)):,}")
+        actual_hover = actual.map(lambda v: f"€{int(round(v)):,}")
+        variance_hover = variance.map(lambda v: f"€{int(round(v)):+,}")
+        tick_format = ",.0f"
+    else:
+        budget_hover = budget.map(lambda v: f"{v:.1f}%")
+        actual_hover = actual.map(lambda v: f"{v:.1f}%")
+        variance_hover = variance.map(lambda v: f"{v:+.1f}pp")
+        tick_format = ".1f"
+
+    bar_colors = [
+        f"rgba(220, 38, 38, {VARIANCE_BAR_OPACITY})" if v < 0 else f"rgba(45, 106, 79, {VARIANCE_BAR_OPACITY})"
+        for v in variance
+    ]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=x,
+            y=variance,
+            name="Variance",
+            marker_color=bar_colors,
+            hovertemplate="%{x}<br>Variance: %{customdata}<extra></extra>",
+            customdata=variance_hover,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=budget,
+            mode="lines+markers",
+            name="Budget",
+            line=dict(color=GREEN_LIGHT, width=2.5, dash="dash"),
+            marker=dict(size=7),
+            hovertemplate="%{x}<br>Budget: %{customdata}<extra></extra>",
+            customdata=budget_hover,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=actual,
+            mode="lines+markers",
+            name="Actual",
+            line=dict(color=GREEN, width=3),
+            marker=dict(size=8),
+            hovertemplate="%{x}<br>Actual: %{customdata}<extra></extra>",
+            customdata=actual_hover,
+        )
+    )
+    fig.update_layout(
+        title=title,
+        xaxis_title="Studio period",
+        yaxis_title=y_title,
+        height=CHART_HEIGHT,
+        margin=dict(l=10, r=10, t=50, b=40),
+        barmode="overlay",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        hovermode="x unified",
+    )
+    fig.update_yaxes(tickformat=tick_format)
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+
+
+def _render_cumulative_net_profit_charts(cumulative: pd.DataFrame) -> None:
+    _section_header("Cumulative Net Profit & Margin")
+    col_profit, col_margin = st.columns(2)
+
+    with col_profit:
+        _combo_budget_actual_chart(
+            cumulative,
+            title="Cumulative net profit",
+            budget_col="cum_budget_net_profit",
+            actual_col="cum_actual_net_profit",
+            variance_col="cum_net_profit_variance",
+            y_title="Cumulative net profit (€)",
+            value_kind="eur",
+        )
+
+    with col_margin:
+        _combo_budget_actual_chart(
+            cumulative,
+            title="Cumulative net margin",
+            budget_col="cum_budget_net_margin_pct",
+            actual_col="cum_actual_net_margin_pct",
+            variance_col="cum_net_margin_variance_pp",
+            y_title="Cumulative net margin (%)",
+            value_kind="pct",
+        )
+
+    st.caption(
+        "Net profit = gross profit − fixed operating expenses (EBITDA). "
+        "Cumulative margin = cumulative net profit ÷ cumulative revenue. "
+        "Shaded bars show actual minus budget variance."
+    )
+
+
 def _render_comparison_tab(
     started: pd.DataFrame,
     cumulative: pd.DataFrame,
@@ -580,8 +706,9 @@ def render(
         st.info("No studio periods have started yet.")
         return
 
-    cumulative = add_cumulative_columns(started)
     fixed_long = build_fixed_costs_comparison(expense_df, started)
+    started = attach_actual_net_profit(started, fixed_long)
+    cumulative = add_cumulative_columns(started)
     fixed_cumulative = add_fixed_costs_cumulative(fixed_long)
 
     current_mask = (started["period_start"] <= today) & (started["period_end"] >= today)
@@ -591,6 +718,10 @@ def render(
             f"**{focus['period_label']}** is in progress ({focus['period_range']}). "
             "Actual figures for the current period are partial."
         )
+
+    _render_cumulative_net_profit_charts(cumulative)
+
+    st.divider()
 
     _render_comparison_tab(started, cumulative, fixed_long, fixed_cumulative)
 
