@@ -578,7 +578,7 @@ def _render_cumulative_net_profit_charts(cumulative: pd.DataFrame) -> None:
         )
 
     st.caption(
-        "Net profit = gross profit − fixed operating expenses (EBITDA). "
+        "Net profit = revenue − instructor fees − fixed operating expenses. "
         "Cumulative margin = cumulative net profit ÷ cumulative revenue."
     )
 
@@ -698,11 +698,11 @@ def render(
             "Actual figures for the current period are partial."
         )
 
-    _render_cumulative_net_profit_charts(cumulative)
+    _render_comparison_tab(started, cumulative, fixed_long, fixed_cumulative)
 
     st.divider()
 
-    _render_comparison_tab(started, cumulative, fixed_long, fixed_cumulative)
+    _render_cumulative_net_profit_charts(cumulative)
 
     st.caption(
         "Revenue & margin: red if variance < −15%, orange −15% to −5%, green ≥ −5%. "

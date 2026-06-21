@@ -815,9 +815,7 @@ FINANCIAL_MODEL_BUDGET_QUERY = """
         s.instructor_fees,
         s.gross_profit,
         s.gross_margin_pct,
-        s.total_fixed_opex,
-        s.ebitda,
-        s.ebitda_margin_pct
+        s.total_fixed_opex
     FROM financial_model_periods p
     JOIN financial_model_revenue r ON r.period_code = p.period_code
     JOIN financial_model_summary s ON s.period_code = p.period_code
@@ -840,8 +838,6 @@ def load_financial_model_budget() -> pd.DataFrame:
         "gross_profit",
         "gross_margin_pct",
         "total_fixed_opex",
-        "ebitda",
-        "ebitda_margin_pct",
     ):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["period_start"] = pd.to_datetime(df["period_start"]).dt.date
@@ -929,8 +925,10 @@ def build_budget_vs_actuals(
         budget_gross_profit = float(period["gross_profit"])
         budget_margin = float(period["gross_margin_pct"])
         budget_fixed_opex = float(period["total_fixed_opex"])
-        budget_net_profit = float(period["ebitda"])
-        budget_net_margin = float(period["ebitda_margin_pct"])
+        budget_net_profit = budget_revenue - budget_instructor - budget_fixed_opex
+        budget_net_margin = (
+            budget_net_profit / budget_revenue * 100 if budget_revenue > 0 else None
+        )
 
         actual_gross_profit = actual_revenue - actual_instructor
         actual_margin = (
@@ -973,7 +971,7 @@ def attach_actual_net_profit(
     comparison: pd.DataFrame,
     fixed_long: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Add actual fixed OPEX and net profit (EBITDA) from Revolut fixed expenses."""
+    """Add actual fixed OPEX and net profit from Revolut fixed expenses."""
     if comparison.empty:
         return comparison
 
@@ -985,7 +983,9 @@ def attach_actual_net_profit(
         by_code = totals.set_index("period_code")["actual_amount"]
         out["actual_fixed_opex"] = out["period_code"].map(by_code).fillna(0.0)
 
-    out["actual_net_profit"] = out["actual_gross_profit"] - out["actual_fixed_opex"]
+    out["actual_net_profit"] = (
+        out["actual_revenue"] - out["actual_instructor_fees"] - out["actual_fixed_opex"]
+    )
     out["actual_net_margin_pct"] = (
         out["actual_net_profit"] / out["actual_revenue"].replace(0, pd.NA) * 100
     )
