@@ -731,25 +731,45 @@ def _selected_period_indices(period_codes: list[str]) -> list[int]:
     ]
 
 
-def _enabled_period_indices(selected_indices: list[int], total: int) -> set[int]:
-    """Indices the user may toggle: range endpoints, plus one slot on each side."""
-    if not selected_indices:
-        return set(range(total))
+def _apply_period_toggle(
+    period_codes: list[str],
+    period_code: str,
+) -> None:
+    """Expand selection to fill gaps when checking; shrink from an edge when unchecking."""
+    idx = period_codes.index(period_code)
+    cb_key = _period_checkbox_key(period_code)
+    checked = st.session_state[cb_key]
+    selected = _selected_period_indices(period_codes)
 
-    lo, hi = min(selected_indices), max(selected_indices)
-    enabled = {lo, hi}
-    if lo > 0:
-        enabled.add(lo - 1)
-    if hi < total - 1:
-        enabled.add(hi + 1)
-    return enabled
+    if checked:
+        if not selected:
+            return
+        lo, hi = min(selected), max(selected)
+        for i in range(min(lo, idx), max(hi, idx) + 1):
+            st.session_state[_period_checkbox_key(period_codes[i])] = True
+        return
+
+    if len(selected) <= 1:
+        st.session_state[cb_key] = True
+        return
+
+    lo, hi = min(selected), max(selected)
+    if idx == lo:
+        for i in range(lo, hi + 1):
+            st.session_state[_period_checkbox_key(period_codes[i])] = i != lo
+    elif idx == hi:
+        for i in range(lo, hi + 1):
+            st.session_state[_period_checkbox_key(period_codes[i])] = i != hi
+    else:
+        for i in range(lo, hi + 1):
+            st.session_state[_period_checkbox_key(period_codes[i])] = i < idx
 
 
 def _sidebar_period_selection(
     comparison: pd.DataFrame,
     today: date,
 ) -> tuple[list[str], int, int]:
-    """Consecutive studio-period checkboxes; only adjacent periods are selectable."""
+    """Studio-period checkboxes; non-adjacent picks auto-fill the range in between."""
     period_codes = comparison.sort_values("period_index")["period_code"].tolist()
     default_code = _default_period_code(comparison, today)
     default_index = period_codes.index(default_code)
@@ -762,42 +782,24 @@ def _sidebar_period_selection(
         if cb_key not in st.session_state:
             st.session_state[cb_key] = code in st.session_state[BUDGET_PERIOD_VALID_KEY]
 
-    selected_indices = _selected_period_indices(period_codes)
-    if not selected_indices:
-        selected_indices = [default_index]
-        _set_period_checkboxes(period_codes, [default_code])
-
-    lo, hi = min(selected_indices), max(selected_indices)
-    if hi - lo + 1 != len(selected_indices):
-        selected_indices = list(range(lo, hi + 1))
-        _set_period_checkboxes(
-            period_codes,
-            [period_codes[i] for i in selected_indices],
-        )
-
-    enabled_indices = _enabled_period_indices(selected_indices, len(period_codes))
-
     st.sidebar.header("Filters")
     st.sidebar.caption(
-        "Select one period, or tick the next/previous period to extend the range."
+        "Tick any period — all studio months in between are selected automatically."
     )
     st.sidebar.markdown("**Studio periods**")
 
     with st.sidebar.container(border=True):
-        for i, code in enumerate(period_codes):
+        for code in period_codes:
             row = comparison.loc[comparison["period_code"] == code].iloc[0]
-            cb_key = _period_checkbox_key(code)
-            in_range = lo <= i <= hi
-            is_enabled = i in enabled_indices
 
-            if not is_enabled:
-                st.session_state[cb_key] = in_range
+            def _on_toggle(*, _code: str = code) -> None:
+                _apply_period_toggle(period_codes, _code)
 
             st.checkbox(
                 code,
-                key=cb_key,
-                disabled=not is_enabled,
+                key=_period_checkbox_key(code),
                 help=str(row["period_range"]),
+                on_change=_on_toggle,
             )
 
     selected_indices = _selected_period_indices(period_codes)
