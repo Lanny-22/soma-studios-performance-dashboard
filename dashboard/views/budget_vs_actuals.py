@@ -710,6 +710,71 @@ def _default_period_code(comparison: pd.DataFrame, today: date) -> str:
     return str(comparison.sort_values("period_index").iloc[0]["period_code"])
 
 
+BUDGET_PERIOD_VALID_KEY = "budget_period_selection_valid"
+BUDGET_PERIOD_WIDGET_KEY = "budget_period_multiselect"
+
+
+def _is_contiguous_period_selection(
+    selected_codes: list[str],
+    period_codes: list[str],
+) -> bool:
+    if len(selected_codes) <= 1:
+        return True
+    indices = sorted(period_codes.index(code) for code in selected_codes)
+    return indices[-1] - indices[0] + 1 == len(indices)
+
+
+def _sidebar_period_selection(
+    comparison: pd.DataFrame,
+    today: date,
+) -> tuple[list[str], int, int]:
+    """Consecutive studio-period multiselect in the sidebar."""
+    period_codes = comparison.sort_values("period_index")["period_code"].tolist()
+    default_code = _default_period_code(comparison, today)
+
+    if BUDGET_PERIOD_VALID_KEY not in st.session_state:
+        st.session_state[BUDGET_PERIOD_VALID_KEY] = [default_code]
+    if BUDGET_PERIOD_WIDGET_KEY not in st.session_state:
+        st.session_state[BUDGET_PERIOD_WIDGET_KEY] = list(
+            st.session_state[BUDGET_PERIOD_VALID_KEY]
+        )
+
+    st.sidebar.header("Filters")
+    st.sidebar.caption("Select consecutive studio periods (13th → 12th).")
+    st.sidebar.multiselect(
+        "Studio periods",
+        options=period_codes,
+        format_func=lambda code: _period_select_label(comparison, code),
+        key=BUDGET_PERIOD_WIDGET_KEY,
+    )
+
+    pending = list(st.session_state[BUDGET_PERIOD_WIDGET_KEY])
+    if not pending:
+        pending = [default_code]
+        st.session_state[BUDGET_PERIOD_WIDGET_KEY] = pending
+
+    if not _is_contiguous_period_selection(pending, period_codes):
+        st.sidebar.warning(
+            "Periods must be consecutive (e.g. MAY26 and JUN26, not MAY26 and AUG26). "
+            "Reverted to your last valid selection."
+        )
+        st.session_state[BUDGET_PERIOD_WIDGET_KEY] = list(
+            st.session_state[BUDGET_PERIOD_VALID_KEY]
+        )
+        selected_codes = list(st.session_state[BUDGET_PERIOD_VALID_KEY])
+    else:
+        selected_codes = pending
+        st.session_state[BUDGET_PERIOD_VALID_KEY] = selected_codes
+
+    min_period_index = int(
+        comparison.loc[comparison["period_code"] == selected_codes[0], "period_index"].iloc[0]
+    )
+    max_period_index = int(
+        comparison.loc[comparison["period_code"] == selected_codes[-1], "period_index"].iloc[0]
+    )
+    return selected_codes, min_period_index, max_period_index
+
+
 def render(
     sales: pd.DataFrame,
     instructors: pd.DataFrame | None,
@@ -736,42 +801,53 @@ def render(
         return
 
     today = date.today()
-    period_codes = comparison.sort_values("period_index")["period_code"].tolist()
-    default_code = _default_period_code(comparison, today)
-    default_index = period_codes.index(default_code) if default_code in period_codes else 0
-
-    selected_code = st.selectbox(
-        "Studio period",
-        options=period_codes,
-        index=default_index,
-        format_func=lambda code: _period_select_label(comparison, code),
-        key="budget_selected_period",
+    selected_codes, min_period_index, max_period_index = _sidebar_period_selection(
+        comparison, today
     )
 
-    selected = comparison[comparison["period_code"] == selected_code].iloc[0]
-    selected_index = int(selected["period_index"])
-
-    st.caption(
-        f"Actuals for **{selected['period_range']}** compared to **{selected_code}** budget."
-    )
-
-    if selected["period_start"] > today:
-        st.info(f"**{selected_code}** has not started yet — actual figures will be zero.")
-    elif selected["period_start"] <= today <= selected["period_end"]:
-        st.info(
-            f"**{selected_code}** is in progress ({selected['period_range']}). "
-            "Actual figures for the current period are partial."
+    if len(selected_codes) == 1:
+        selected = comparison[comparison["period_code"] == selected_codes[0]].iloc[0]
+        st.caption(
+            f"Actuals for **{selected['period_range']}** compared to **{selected_codes[0]}** budget."
         )
+        if selected["period_start"] > today:
+            st.info(f"**{selected_codes[0]}** has not started yet — actual figures will be zero.")
+        elif selected["period_start"] <= today <= selected["period_end"]:
+            st.info(
+                f"**{selected_codes[0]}** is in progress ({selected['period_range']}). "
+                "Actual figures for the current period are partial."
+            )
+    else:
+        first = comparison[comparison["period_code"] == selected_codes[0]].iloc[0]
+        last = comparison[comparison["period_code"] == selected_codes[-1]].iloc[0]
+        st.caption(
+            f"Actuals for **{selected_codes[0]}** through **{selected_codes[-1]}** "
+            f"({first['period_start']:%d %b %Y} – {last['period_end']:%d %b %Y}) compared to budget."
+        )
+        in_progress = comparison[
+            (comparison["period_code"].isin(selected_codes))
+            & (comparison["period_start"] <= today)
+            & (comparison["period_end"] >= today)
+        ]
+        if not in_progress.empty:
+            focus = in_progress.iloc[-1]
+            st.info(
+                f"**{focus['period_code']}** is in progress ({focus['period_range']}). "
+                "Actual figures for the current period are partial."
+            )
 
-    single = comparison[comparison["period_code"] == selected_code].copy()
-    through = comparison[comparison["period_index"] <= selected_index].copy()
+    marginal = comparison[
+        (comparison["period_index"] >= min_period_index)
+        & (comparison["period_index"] <= max_period_index)
+    ].copy()
+    through = comparison[comparison["period_index"] <= max_period_index].copy()
     through_actual = through[through["period_start"] <= today].copy()
 
-    fixed_long_marginal = build_fixed_costs_comparison(expense_df, single)
-    single = attach_actual_net_profit(single, fixed_long_marginal)
+    fixed_long_marginal = build_fixed_costs_comparison(expense_df, marginal)
+    marginal = attach_actual_net_profit(marginal, fixed_long_marginal)
 
     if through_actual.empty:
-        cumulative = add_cumulative_columns(single)
+        cumulative = add_cumulative_columns(marginal)
         fixed_long_cumulative = fixed_long_marginal
     else:
         fixed_long_cumulative = build_fixed_costs_comparison(expense_df, through_actual)
@@ -780,11 +856,11 @@ def render(
 
     fixed_cumulative = add_fixed_costs_cumulative(fixed_long_cumulative)
 
-    _render_comparison_tab(single, cumulative, fixed_long_marginal, fixed_cumulative)
+    _render_comparison_tab(marginal, cumulative, fixed_long_marginal, fixed_cumulative)
 
     st.divider()
 
-    _render_net_profit_charts(single, cumulative, sales, expense_df)
+    _render_net_profit_charts(marginal, cumulative, sales, expense_df)
 
     st.caption(
         "Revenue & margin: red if variance < −15%, orange −15% to −5%, green ≥ −5%. "
