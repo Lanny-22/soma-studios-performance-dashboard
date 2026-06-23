@@ -691,6 +691,25 @@ def render_model_budget(budget: pd.DataFrame) -> None:
     )
 
 
+def _period_select_label(comparison: pd.DataFrame, period_code: str) -> str:
+    row = comparison.loc[comparison["period_code"] == period_code].iloc[0]
+    return f"{period_code} ({row['period_range']})"
+
+
+def _default_period_code(comparison: pd.DataFrame, today: date) -> str:
+    in_progress = comparison[
+        (comparison["period_start"] <= today) & (comparison["period_end"] >= today)
+    ]
+    if not in_progress.empty:
+        return str(in_progress.iloc[-1]["period_code"])
+
+    started = comparison[comparison["period_start"] <= today]
+    if not started.empty:
+        return str(started.iloc[-1]["period_code"])
+
+    return str(comparison.sort_values("period_index").iloc[0]["period_code"])
+
+
 def render(
     sales: pd.DataFrame,
     instructors: pd.DataFrame | None,
@@ -717,29 +736,55 @@ def render(
         return
 
     today = date.today()
-    started = comparison[comparison["period_start"] <= today].copy()
-    if started.empty:
-        st.info("No studio periods have started yet.")
-        return
+    period_codes = comparison.sort_values("period_index")["period_code"].tolist()
+    default_code = _default_period_code(comparison, today)
+    default_index = period_codes.index(default_code) if default_code in period_codes else 0
 
-    fixed_long = build_fixed_costs_comparison(expense_df, started)
-    started = attach_actual_net_profit(started, fixed_long)
-    cumulative = add_cumulative_columns(started)
-    fixed_cumulative = add_fixed_costs_cumulative(fixed_long)
+    selected_code = st.selectbox(
+        "Studio period",
+        options=period_codes,
+        index=default_index,
+        format_func=lambda code: _period_select_label(comparison, code),
+        key="budget_selected_period",
+    )
 
-    current_mask = (started["period_start"] <= today) & (started["period_end"] >= today)
-    if current_mask.any() and started.loc[current_mask, "period_end"].iloc[-1] >= today:
-        focus = started[current_mask].iloc[-1]
+    selected = comparison[comparison["period_code"] == selected_code].iloc[0]
+    selected_index = int(selected["period_index"])
+
+    st.caption(
+        f"Actuals for **{selected['period_range']}** compared to **{selected_code}** budget."
+    )
+
+    if selected["period_start"] > today:
+        st.info(f"**{selected_code}** has not started yet — actual figures will be zero.")
+    elif selected["period_start"] <= today <= selected["period_end"]:
         st.info(
-            f"**{focus['period_label']}** is in progress ({focus['period_range']}). "
+            f"**{selected_code}** is in progress ({selected['period_range']}). "
             "Actual figures for the current period are partial."
         )
 
-    _render_comparison_tab(started, cumulative, fixed_long, fixed_cumulative)
+    single = comparison[comparison["period_code"] == selected_code].copy()
+    through = comparison[comparison["period_index"] <= selected_index].copy()
+    through_actual = through[through["period_start"] <= today].copy()
+
+    fixed_long_marginal = build_fixed_costs_comparison(expense_df, single)
+    single = attach_actual_net_profit(single, fixed_long_marginal)
+
+    if through_actual.empty:
+        cumulative = add_cumulative_columns(single)
+        fixed_long_cumulative = fixed_long_marginal
+    else:
+        fixed_long_cumulative = build_fixed_costs_comparison(expense_df, through_actual)
+        through_actual = attach_actual_net_profit(through_actual, fixed_long_cumulative)
+        cumulative = add_cumulative_columns(through_actual)
+
+    fixed_cumulative = add_fixed_costs_cumulative(fixed_long_cumulative)
+
+    _render_comparison_tab(single, cumulative, fixed_long_marginal, fixed_cumulative)
 
     st.divider()
 
-    _render_net_profit_charts(started, cumulative, sales, expense_df)
+    _render_net_profit_charts(single, cumulative, sales, expense_df)
 
     st.caption(
         "Revenue & margin: red if variance < −15%, orange −15% to −5%, green ≥ −5%. "

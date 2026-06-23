@@ -205,6 +205,16 @@ def combined_date_bounds(
     return min_date, max_date
 
 
+def active_page_url_path() -> str | None:
+    """Last URL segment for the current Streamlit page (e.g. budget-vs-actuals)."""
+    try:
+        url = getattr(st.context, "url", None) or ""
+        path = url.split("?")[0].rstrip("/").split("/")[-1]
+        return path or None
+    except Exception:
+        return None
+
+
 def sidebar_date_range(
     raw: pd.DataFrame,
     header: str = "Filters",

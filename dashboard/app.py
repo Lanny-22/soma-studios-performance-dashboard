@@ -3,6 +3,8 @@
 import streamlit as st
 
 from dashboard.shared import (
+    active_page_url_path,
+    combined_date_bounds,
     load_class_occupancy_or_error,
     load_expenses_or_error,
     load_financial_model_or_error,
@@ -130,7 +132,11 @@ def main() -> None:
 
     expenses = load_expenses_or_error()
     occupancy = load_class_occupancy_or_error()
-    start, end = sidebar_date_range(raw, expenses=expenses, occupancy=occupancy)
+    skip_sidebar_dates = active_page_url_path() == "budget-vs-actuals"
+    if skip_sidebar_dates:
+        start, end = combined_date_bounds(raw, expenses=expenses, occupancy=occupancy)
+    else:
+        start, end = sidebar_date_range(raw, expenses=expenses, occupancy=occupancy)
     st.session_state["dash_raw"] = raw
     st.session_state["dash_start"] = start
     st.session_state["dash_end"] = end
