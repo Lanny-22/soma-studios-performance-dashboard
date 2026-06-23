@@ -711,7 +711,24 @@ def _default_period_code(comparison: pd.DataFrame, today: date) -> str:
 
 
 BUDGET_PERIOD_VALID_KEY = "budget_period_selection_valid"
-BUDGET_PERIOD_WIDGET_KEY = "budget_period_multiselect"
+
+
+def _period_checkbox_key(period_code: str) -> str:
+    return f"budget_period_cb_{period_code}"
+
+
+def _set_period_checkboxes(period_codes: list[str], selected_codes: list[str]) -> None:
+    selected = set(selected_codes)
+    for code in period_codes:
+        st.session_state[_period_checkbox_key(code)] = code in selected
+
+
+def _read_period_checkboxes(period_codes: list[str]) -> list[str]:
+    return [
+        code
+        for code in period_codes
+        if st.session_state.get(_period_checkbox_key(code), False)
+    ]
 
 
 def _is_contiguous_period_selection(
@@ -728,43 +745,46 @@ def _sidebar_period_selection(
     comparison: pd.DataFrame,
     today: date,
 ) -> tuple[list[str], int, int]:
-    """Consecutive studio-period multiselect in the sidebar."""
+    """Consecutive studio-period checkboxes in the sidebar (Tableau-style filter)."""
     period_codes = comparison.sort_values("period_index")["period_code"].tolist()
     default_code = _default_period_code(comparison, today)
 
     if BUDGET_PERIOD_VALID_KEY not in st.session_state:
         st.session_state[BUDGET_PERIOD_VALID_KEY] = [default_code]
-    if BUDGET_PERIOD_WIDGET_KEY not in st.session_state:
-        st.session_state[BUDGET_PERIOD_WIDGET_KEY] = list(
-            st.session_state[BUDGET_PERIOD_VALID_KEY]
-        )
+
+    for code in period_codes:
+        cb_key = _period_checkbox_key(code)
+        if cb_key not in st.session_state:
+            st.session_state[cb_key] = code in st.session_state[BUDGET_PERIOD_VALID_KEY]
 
     st.sidebar.header("Filters")
     st.sidebar.caption("Select consecutive studio periods (13th → 12th).")
-    st.sidebar.multiselect(
-        "Studio periods",
-        options=period_codes,
-        format_func=lambda code: _period_select_label(comparison, code),
-        key=BUDGET_PERIOD_WIDGET_KEY,
-    )
+    st.sidebar.markdown("**Studio periods**")
 
-    pending = list(st.session_state[BUDGET_PERIOD_WIDGET_KEY])
+    with st.sidebar.container(border=True):
+        for code in period_codes:
+            row = comparison.loc[comparison["period_code"] == code].iloc[0]
+            st.checkbox(
+                code,
+                key=_period_checkbox_key(code),
+                help=str(row["period_range"]),
+            )
+
+    pending = _read_period_checkboxes(period_codes)
     if not pending:
         pending = [default_code]
-        st.session_state[BUDGET_PERIOD_WIDGET_KEY] = pending
+        _set_period_checkboxes(period_codes, pending)
 
     if not _is_contiguous_period_selection(pending, period_codes):
         st.sidebar.warning(
             "Periods must be consecutive (e.g. MAY26 and JUN26, not MAY26 and AUG26). "
             "Reverted to your last valid selection."
         )
-        st.session_state[BUDGET_PERIOD_WIDGET_KEY] = list(
-            st.session_state[BUDGET_PERIOD_VALID_KEY]
-        )
-        selected_codes = list(st.session_state[BUDGET_PERIOD_VALID_KEY])
-    else:
-        selected_codes = pending
-        st.session_state[BUDGET_PERIOD_VALID_KEY] = selected_codes
+        _set_period_checkboxes(period_codes, st.session_state[BUDGET_PERIOD_VALID_KEY])
+        st.rerun()
+
+    selected_codes = pending
+    st.session_state[BUDGET_PERIOD_VALID_KEY] = selected_codes
 
     min_period_index = int(
         comparison.loc[comparison["period_code"] == selected_codes[0], "period_index"].iloc[0]
