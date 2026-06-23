@@ -723,31 +723,36 @@ def _set_period_checkboxes(period_codes: list[str], selected_codes: list[str]) -
         st.session_state[_period_checkbox_key(code)] = code in selected
 
 
-def _read_period_checkboxes(period_codes: list[str]) -> list[str]:
+def _selected_period_indices(period_codes: list[str]) -> list[int]:
     return [
-        code
-        for code in period_codes
+        i
+        for i, code in enumerate(period_codes)
         if st.session_state.get(_period_checkbox_key(code), False)
     ]
 
 
-def _is_contiguous_period_selection(
-    selected_codes: list[str],
-    period_codes: list[str],
-) -> bool:
-    if len(selected_codes) <= 1:
-        return True
-    indices = sorted(period_codes.index(code) for code in selected_codes)
-    return indices[-1] - indices[0] + 1 == len(indices)
+def _enabled_period_indices(selected_indices: list[int], total: int) -> set[int]:
+    """Indices the user may toggle: range endpoints, plus one slot on each side."""
+    if not selected_indices:
+        return set(range(total))
+
+    lo, hi = min(selected_indices), max(selected_indices)
+    enabled = {lo, hi}
+    if lo > 0:
+        enabled.add(lo - 1)
+    if hi < total - 1:
+        enabled.add(hi + 1)
+    return enabled
 
 
 def _sidebar_period_selection(
     comparison: pd.DataFrame,
     today: date,
 ) -> tuple[list[str], int, int]:
-    """Consecutive studio-period checkboxes in the sidebar (Tableau-style filter)."""
+    """Consecutive studio-period checkboxes; only adjacent periods are selectable."""
     period_codes = comparison.sort_values("period_index")["period_code"].tolist()
     default_code = _default_period_code(comparison, today)
+    default_index = period_codes.index(default_code)
 
     if BUDGET_PERIOD_VALID_KEY not in st.session_state:
         st.session_state[BUDGET_PERIOD_VALID_KEY] = [default_code]
@@ -757,33 +762,50 @@ def _sidebar_period_selection(
         if cb_key not in st.session_state:
             st.session_state[cb_key] = code in st.session_state[BUDGET_PERIOD_VALID_KEY]
 
+    selected_indices = _selected_period_indices(period_codes)
+    if not selected_indices:
+        selected_indices = [default_index]
+        _set_period_checkboxes(period_codes, [default_code])
+
+    lo, hi = min(selected_indices), max(selected_indices)
+    if hi - lo + 1 != len(selected_indices):
+        selected_indices = list(range(lo, hi + 1))
+        _set_period_checkboxes(
+            period_codes,
+            [period_codes[i] for i in selected_indices],
+        )
+
+    enabled_indices = _enabled_period_indices(selected_indices, len(period_codes))
+
     st.sidebar.header("Filters")
-    st.sidebar.caption("Select consecutive studio periods (13th → 12th).")
+    st.sidebar.caption(
+        "Select one period, or tick the next/previous period to extend the range."
+    )
     st.sidebar.markdown("**Studio periods**")
 
     with st.sidebar.container(border=True):
-        for code in period_codes:
+        for i, code in enumerate(period_codes):
             row = comparison.loc[comparison["period_code"] == code].iloc[0]
+            cb_key = _period_checkbox_key(code)
+            in_range = lo <= i <= hi
+            is_enabled = i in enabled_indices
+
+            if not is_enabled:
+                st.session_state[cb_key] = in_range
+
             st.checkbox(
                 code,
-                key=_period_checkbox_key(code),
+                key=cb_key,
+                disabled=not is_enabled,
                 help=str(row["period_range"]),
             )
 
-    pending = _read_period_checkboxes(period_codes)
-    if not pending:
-        pending = [default_code]
-        _set_period_checkboxes(period_codes, pending)
+    selected_indices = _selected_period_indices(period_codes)
+    if not selected_indices:
+        selected_indices = [default_index]
+        _set_period_checkboxes(period_codes, [default_code])
 
-    if not _is_contiguous_period_selection(pending, period_codes):
-        st.sidebar.warning(
-            "Periods must be consecutive (e.g. MAY26 and JUN26, not MAY26 and AUG26). "
-            "Reverted to your last valid selection."
-        )
-        _set_period_checkboxes(period_codes, st.session_state[BUDGET_PERIOD_VALID_KEY])
-        st.rerun()
-
-    selected_codes = pending
+    selected_codes = [period_codes[i] for i in sorted(selected_indices)]
     st.session_state[BUDGET_PERIOD_VALID_KEY] = selected_codes
 
     min_period_index = int(
