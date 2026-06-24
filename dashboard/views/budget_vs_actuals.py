@@ -27,7 +27,7 @@ from dashboard.data import (
     sum_pre_opening_expenses,
     sum_pre_opening_revenue,
 )
-from dashboard.shared import CHART_HEIGHT, GREEN, GREEN_LIGHT, PLOTLY_CONFIG
+from dashboard.shared import CHART_HEIGHT, GREEN, GREEN_LIGHT, PLOTLY_CONFIG, active_page_url_path
 
 MetricFmt = Callable[[float | None], str]
 VarianceKind = Literal["revenue", "expense", "margin"]
@@ -696,21 +696,24 @@ def _period_select_label(comparison: pd.DataFrame, period_code: str) -> str:
     return f"{period_code} ({row['period_range']})"
 
 
+DEFAULT_PERIOD_CODE = "MAY26"
+BUDGET_PERIOD_VALID_KEY = "budget_period_selection_valid"
+BUDGET_TAB_ACTIVE_KEY = "budget_vs_actuals_tab_active"
+
+
 def _default_period_code(comparison: pd.DataFrame, today: date) -> str:
-    in_progress = comparison[
-        (comparison["period_start"] <= today) & (comparison["period_end"] >= today)
-    ]
-    if not in_progress.empty:
-        return str(in_progress.iloc[-1]["period_code"])
-
-    started = comparison[comparison["period_start"] <= today]
-    if not started.empty:
-        return str(started.iloc[-1]["period_code"])
-
+    if DEFAULT_PERIOD_CODE in comparison["period_code"].values:
+        return DEFAULT_PERIOD_CODE
     return str(comparison.sort_values("period_index").iloc[0]["period_code"])
 
 
-BUDGET_PERIOD_VALID_KEY = "budget_period_selection_valid"
+def _reset_period_on_tab_access(period_codes: list[str], default_code: str) -> None:
+    on_budget_tab = active_page_url_path() == "budget-vs-actuals"
+    was_on_budget_tab = st.session_state.get(BUDGET_TAB_ACTIVE_KEY, False)
+    st.session_state[BUDGET_TAB_ACTIVE_KEY] = on_budget_tab
+    if on_budget_tab and not was_on_budget_tab:
+        _set_period_checkboxes(period_codes, [default_code])
+        st.session_state[BUDGET_PERIOD_VALID_KEY] = [default_code]
 
 
 def _period_checkbox_key(period_code: str) -> str:
@@ -773,6 +776,8 @@ def _sidebar_period_selection(
     period_codes = comparison.sort_values("period_index")["period_code"].tolist()
     default_code = _default_period_code(comparison, today)
     default_index = period_codes.index(default_code)
+
+    _reset_period_on_tab_access(period_codes, default_code)
 
     if BUDGET_PERIOD_VALID_KEY not in st.session_state:
         st.session_state[BUDGET_PERIOD_VALID_KEY] = [default_code]
