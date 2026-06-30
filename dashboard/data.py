@@ -918,12 +918,32 @@ def sum_pre_opening_expenses(expenses: pd.DataFrame) -> float:
     return float(rows.loc[mask, "spend"].sum())
 
 
+INSTRUCTOR_FEE_EXPENSE_LABEL = "Instructor / Coach Fee"
+
+
+def sum_instructor_expenses(expenses: pd.DataFrame, start: date, end: date) -> float:
+    """Instructor payouts from Revolut expenses (payment completed date, Malta)."""
+    if expenses.empty:
+        return 0.0
+
+    rows = expenses[~expenses["manually_excluded"].fillna(False)].copy()
+    if rows.empty:
+        return 0.0
+
+    mask = (
+        (rows["expense_date"] >= start)
+        & (rows["expense_date"] <= end)
+        & (rows["label"] == INSTRUCTOR_FEE_EXPENSE_LABEL)
+    )
+    return float(rows.loc[mask, "spend"].sum())
+
+
 def build_budget_vs_actuals(
     sales: pd.DataFrame,
-    instructors: pd.DataFrame,
+    expenses: pd.DataFrame,
     budget: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Join financial-model periods with Momence actual revenue and instructor pay."""
+    """Join financial-model periods with Momence revenue and Revolut instructor pay."""
     if budget.empty:
         return pd.DataFrame()
 
@@ -944,15 +964,7 @@ def build_budget_vs_actuals(
             )
             actual_revenue = float(revenue_sales.loc[mask, "net_sales"].sum())
 
-        if instructors.empty:
-            actual_instructor = 0.0
-        else:
-            inst_mask = (instructors["class_date"] >= start) & (
-                instructors["class_date"] <= end
-            )
-            actual_instructor = float(
-                instructors.loc[inst_mask, "instructor_payout"].sum()
-            )
+        actual_instructor = sum_instructor_expenses(expenses, start, end)
 
         budget_revenue = float(period["total_revenue"])
         budget_instructor = float(period["instructor_fees"])

@@ -13,6 +13,7 @@ import streamlit as st
 from dashboard.data import (
     BUDGET_REVENUE_CATEGORIES,
     FIXED_COST_CATEGORY_ORDER,
+    INSTRUCTOR_FEE_EXPENSE_LABEL,
     TOTAL_FIXED_EXPENSES_LABEL,
     add_budget_model_cumulative,
     add_cumulative_columns,
@@ -404,7 +405,8 @@ def _render_variable_section(started: pd.DataFrame) -> None:
     _section_header("Revenue less Variable Costs Overview")
     _show_pivot_table(started, VARIABLE_METRIC_SPECS)
     st.caption(
-        "Revenue by payment date (Momence). Instructor fees by class date. "
+        "Revenue by payment date (Momence). Instructor fees from Revolut "
+        f"(`{INSTRUCTOR_FEE_EXPENSE_LABEL}`) by expense completed date. "
         "Gross margin = (revenue − instructor payouts) ÷ revenue."
     )
 
@@ -826,7 +828,6 @@ def _sidebar_period_selection(
 
 def render(
     sales: pd.DataFrame,
-    instructors: pd.DataFrame | None,
     budget: pd.DataFrame,
     expenses: pd.DataFrame | None,
 ) -> None:
@@ -834,6 +835,7 @@ def render(
     st.caption(
         "Financial model vs actuals by **studio period** (13th → 12th, from 13 May 2026). "
         f"Revenue = {', '.join(BUDGET_REVENUE_CATEGORIES)} net sales. "
+        f"Instructor fees actual = Revolut `{INSTRUCTOR_FEE_EXPENSE_LABEL}` by payment date. "
         "Excludes presale revenue and pre-opening premises costs before 10 May 2026 "
         "(see totals at the bottom of the page)."
     )
@@ -842,9 +844,8 @@ def render(
         st.warning("No financial model periods found. Run `python3 scripts/run_financial_model_import.py`.")
         return
 
-    instructor_df = instructors if instructors is not None else pd.DataFrame()
     expense_df = expenses if expenses is not None else pd.DataFrame()
-    comparison = build_budget_vs_actuals(sales, instructor_df, budget)
+    comparison = build_budget_vs_actuals(sales, expense_df, budget)
     if comparison.empty:
         st.warning("Could not build budget comparison.")
         return
