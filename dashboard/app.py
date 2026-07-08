@@ -174,6 +174,12 @@ def main() -> None:
                 url_path="total-sales",
             ),
             st.Page(
+                _run_active_members,
+                title="Active Members",
+                icon="👥",
+                url_path="active-members",
+            ),
+            st.Page(
                 _run_packages,
                 title="Packages & Subscriptions",
                 icon="📦",
@@ -196,12 +202,6 @@ def main() -> None:
                 title="Peak Times",
                 icon="🕐",
                 url_path="peak-times",
-            ),
-            st.Page(
-                _run_active_members,
-                title="Active Members",
-                icon="👥",
-                url_path="active-members",
             ),
             st.Page(
                 _run_expenses,
