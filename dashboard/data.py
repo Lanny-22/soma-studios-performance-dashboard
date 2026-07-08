@@ -97,6 +97,68 @@ def load_class_occupancy() -> pd.DataFrame:
     return df
 
 
+ACTIVE_MEMBERS_QUERY = """
+    SELECT
+        snapshot_date,
+        membership,
+        membership_type,
+        avg_usage,
+        active_count,
+        is_presale
+    FROM momence_active_members
+    ORDER BY snapshot_date, membership
+"""
+
+
+def load_active_members() -> pd.DataFrame:
+    with get_conn() as conn:
+        rows = conn.execute(ACTIVE_MEMBERS_QUERY).fetchall()
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    df["snapshot_date"] = pd.to_datetime(df["snapshot_date"]).dt.date
+    df["avg_usage"] = pd.to_numeric(df["avg_usage"], errors="coerce").fillna(0)
+    df["active_count"] = pd.to_numeric(df["active_count"], errors="coerce").fillna(0).astype(int)
+    df["is_presale"] = df["is_presale"].fillna(False).astype(bool)
+    return df
+
+
+def filter_active_member_snapshots(
+    df: pd.DataFrame,
+    start: date,
+    end: date,
+    *,
+    include_presale: bool = True,
+) -> pd.DataFrame:
+    if df.empty:
+        return df
+    filtered = df[(df["snapshot_date"] >= start) & (df["snapshot_date"] <= end)].copy()
+    if not include_presale:
+        filtered = filtered[~filtered["is_presale"]]
+    return filtered
+
+
+def active_members_snapshot_totals(
+    df: pd.DataFrame,
+    *,
+    include_presale: bool = True,
+) -> pd.DataFrame:
+    """One row per snapshot_date with total active members (sum of product counts)."""
+    filtered = df.copy()
+    if not include_presale:
+        filtered = filtered[~filtered["is_presale"]]
+    if filtered.empty:
+        return pd.DataFrame(columns=["snapshot_date", "active_members", "product_lines"])
+
+    totals = (
+        filtered.groupby("snapshot_date", as_index=False)
+        .agg(active_members=("active_count", "sum"), product_lines=("membership", "count"))
+        .sort_values("snapshot_date")
+    )
+    return totals
+
+
 def filter_class_date_range(df: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
     if df.empty:
         return df
@@ -609,6 +671,7 @@ def combined_download_date_bounds(
     expenses: pd.DataFrame | None = None,
     instructors: pd.DataFrame | None = None,
     occupancy: pd.DataFrame | None = None,
+    active_members: pd.DataFrame | None = None,
 ) -> tuple[date, date]:
     bounds: list[date] = []
     if sales is not None and not sales.empty and "payment_date" in sales.columns:
@@ -619,6 +682,8 @@ def combined_download_date_bounds(
         bounds.extend([instructors["class_date"].min(), instructors["class_date"].max()])
     if occupancy is not None and not occupancy.empty:
         bounds.extend([occupancy["class_date"].min(), occupancy["class_date"].max()])
+    if active_members is not None and not active_members.empty:
+        bounds.extend([active_members["snapshot_date"].min(), active_members["snapshot_date"].max()])
     if not bounds:
         today = date.today()
         return today, today
