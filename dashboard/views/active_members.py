@@ -1,6 +1,7 @@
 """Weekly active member snapshots from Momence (Sunday counts by membership product)."""
 
 from datetime import date
+from typing import Any
 
 import plotly.graph_objects as go
 import pandas as pd
@@ -10,7 +11,67 @@ from dashboard.data import (
     active_members_snapshot_totals,
     filter_active_member_snapshots,
 )
-from dashboard.shared import BAR_CHART_HEIGHT, BLACK, GREEN, PLOTLY_CONFIG
+from dashboard.shared import BAR_CHART_HEIGHT, GREEN, PLOTLY_CONFIG
+
+SELECTED_SNAPSHOT_KEY = "active_members_selected_snapshot"
+
+
+def _parse_snapshot_date(value: Any) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    if value is None:
+        return None
+    try:
+        return pd.to_datetime(value).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _snapshot_from_selection(event: Any, snapshot_dates: list[date]) -> date | None:
+    if event is None:
+        return None
+    selection = getattr(event, "selection", None)
+    if selection is None:
+        return None
+    points = getattr(selection, "points", None) or []
+    if not points:
+        return None
+
+    point = points[0]
+    if isinstance(point, dict):
+        raw = point.get("x") or point.get("customdata")
+        idx = point.get("point_index")
+    else:
+        raw = getattr(point, "x", None) or getattr(point, "customdata", None)
+        idx = getattr(point, "point_index", None)
+
+    picked = _parse_snapshot_date(raw)
+    if picked is not None:
+        return picked
+    if idx is not None and 0 <= idx < len(snapshot_dates):
+        return snapshot_dates[idx]
+    return None
+
+
+def _store_snapshot_selection(snapshot: date | None, valid_dates: set[date]) -> None:
+    if snapshot is not None and snapshot in valid_dates:
+        st.session_state[SELECTED_SNAPSHOT_KEY] = snapshot
+
+
+def _snapshot_detail_table(filtered: pd.DataFrame, snapshot: date) -> pd.DataFrame:
+    rows = filtered[filtered["snapshot_date"] == snapshot].copy()
+    if rows.empty:
+        return pd.DataFrame(
+            columns=["membership", "membership_type", "active_count", "is_presale"]
+        )
+    detail = (
+        rows.groupby(["membership", "membership_type"], as_index=False)
+        .agg(active_count=("active_count", "sum"), is_presale=("is_presale", "any"))
+        .sort_values("active_count", ascending=False)
+    )
+    return detail
 
 
 def render(raw: pd.DataFrame, start: date, end: date) -> None:
@@ -52,15 +113,25 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
     )
     c3.metric("Snapshots in range", f"{len(totals):,}")
 
+    snapshot_dates = totals["snapshot_date"].tolist()
+    valid_dates = set(snapshot_dates)
+    stored = st.session_state.get(SELECTED_SNAPSHOT_KEY)
+    if stored not in valid_dates:
+        st.session_state[SELECTED_SNAPSHOT_KEY] = snapshot_dates[-1]
+    selected_snapshot = st.session_state[SELECTED_SNAPSHOT_KEY]
+
     labels = totals["active_members"].map(lambda v: f"{int(v):,}")
+    snapshot_labels = [d.strftime("%d %b %Y") for d in snapshot_dates]
     fig = go.Figure(
         data=go.Bar(
-            x=totals["snapshot_date"],
+            x=snapshot_labels,
             y=totals["active_members"],
             marker_color=GREEN,
             text=labels,
             textposition="outside",
             cliponaxis=False,
+            customdata=snapshot_dates,
+            hovertemplate="<b>%{x}</b><br>%{y:,} active<extra></extra>",
         )
     )
     presale_note = "incl. presale packs" if include_presale else "excl. presale packs"
@@ -71,14 +142,26 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
         height=BAR_CHART_HEIGHT,
         margin=dict(l=48, r=24, t=56, b=48),
         autosize=True,
+        clickmode="event+select",
     )
     fig.update_yaxes(tickformat=",d")
-    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+    event = st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config=PLOTLY_CONFIG,
+        on_select="rerun",
+        selection_mode="points",
+        key="active_members_snapshot_chart",
+    )
+    picked = _snapshot_from_selection(event, snapshot_dates)
+    _store_snapshot_selection(picked, valid_dates)
+    selected_snapshot = st.session_state[SELECTED_SNAPSHOT_KEY]
 
-    with st.expander("Snapshot detail"):
-        detail = (
-            filtered.groupby(["snapshot_date", "membership", "membership_type"], as_index=False)
-            .agg(active_count=("active_count", "sum"), is_presale=("is_presale", "any"))
-            .sort_values(["snapshot_date", "active_count"], ascending=[True, False])
-        )
-        st.dataframe(detail, use_container_width=True, hide_index=True)
+    detail = _snapshot_detail_table(filtered, selected_snapshot)
+    total_selected = int(detail["active_count"].sum()) if not detail.empty else 0
+    st.subheader(f"Snapshot breakdown — {selected_snapshot:%d %b %Y}")
+    st.caption(
+        f"{total_selected:,} active members across {len(detail):,} membership products. "
+        "Click a bar above to change snapshot."
+    )
+    st.dataframe(detail, use_container_width=True, hide_index=True)
