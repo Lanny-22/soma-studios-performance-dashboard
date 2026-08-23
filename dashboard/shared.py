@@ -237,6 +237,10 @@ def active_page_url_path() -> str | None:
         return None
 
 
+def _clamp_date(value: date, min_date: date, max_date: date) -> date:
+    return max(min_date, min(value, max_date))
+
+
 def sidebar_date_range(
     raw: pd.DataFrame,
     header: str = "Filters",
@@ -244,19 +248,43 @@ def sidebar_date_range(
     occupancy: pd.DataFrame | None = None,
     active_members: pd.DataFrame | None = None,
 ) -> tuple[date, date]:
+    """Start/end date pickers (separate widgets so changing one month keeps the other)."""
     min_date, max_date = combined_date_bounds(
         raw, expenses, occupancy, active_members=active_members
     )
     st.sidebar.header(header)
-    start, end = st.sidebar.date_input(
-        "Date range",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date,
-        key="global_date_range",
+
+    if "global_date_start" not in st.session_state:
+        st.session_state["global_date_start"] = min_date
+    if "global_date_end" not in st.session_state:
+        st.session_state["global_date_end"] = max_date
+
+    # Keep the user's selection when data bounds expand; only clamp if out of range.
+    st.session_state["global_date_start"] = _clamp_date(
+        st.session_state["global_date_start"], min_date, max_date
     )
-    if not isinstance(start, date):
-        start, end = start[0], start[1]
+    st.session_state["global_date_end"] = _clamp_date(
+        st.session_state["global_date_end"], min_date, max_date
+    )
+
+    c1, c2 = st.sidebar.columns(2)
+    with c1:
+        start = st.date_input(
+            "Start",
+            min_value=min_date,
+            max_value=max_date,
+            key="global_date_start",
+        )
+    with c2:
+        end = st.date_input(
+            "End",
+            min_value=min_date,
+            max_value=max_date,
+            key="global_date_end",
+        )
+
+    if start > end:
+        start, end = end, start
     return start, end
 
 

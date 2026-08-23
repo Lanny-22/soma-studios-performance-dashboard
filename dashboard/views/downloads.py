@@ -13,7 +13,12 @@ from dashboard.data import (
     load_total_sales_export,
     log_download_event,
 )
-from dashboard.shared import cached_all_expenses, cached_class_occupancy, client_request_meta, download_user_names
+from dashboard.shared import (
+    cached_all_expenses,
+    cached_class_occupancy,
+    client_request_meta,
+    download_user_names,
+)
 
 
 def _download_filename(prefix: str, start: date, end: date) -> str:
@@ -76,14 +81,31 @@ def render(
     )
 
     st.subheader("Export settings")
-    c1, c2 = st.columns(2)
-    with c1:
-        start, end = st.date_input(
-            "Date range",
-            value=(min_date, max_date),
+    if "download_date_start" not in st.session_state:
+        st.session_state["download_date_start"] = min_date
+    if "download_date_end" not in st.session_state:
+        st.session_state["download_date_end"] = max_date
+    st.session_state["download_date_start"] = max(
+        min_date, min(st.session_state["download_date_start"], max_date)
+    )
+    st.session_state["download_date_end"] = max(
+        min_date, min(st.session_state["download_date_end"], max_date)
+    )
+
+    d1, d2, c2 = st.columns([1, 1, 2])
+    with d1:
+        start = st.date_input(
+            "Start",
             min_value=min_date,
             max_value=max_date,
-            key="download_date_range",
+            key="download_date_start",
+        )
+    with d2:
+        end = st.date_input(
+            "End",
+            min_value=min_date,
+            max_value=max_date,
+            key="download_date_end",
         )
     with c2:
         selected = st.multiselect(
@@ -94,8 +116,8 @@ def render(
             key="download_dataset_filter",
         )
 
-    if not isinstance(start, date):
-        start, end = start[0], start[1]
+    if start > end:
+        start, end = end, start
 
     with st.expander("Your details (optional)", expanded=False):
         st.caption("If provided, your name is stored in the download audit log with each export.")
