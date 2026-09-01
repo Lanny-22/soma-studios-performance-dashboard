@@ -12,6 +12,7 @@ from src.db import get_conn
 logger = logging.getLogger(__name__)
 
 STUDIO_TIMEZONE = "Europe/Malta"
+SUCCEEDED_PAYMENT_STATUS = "Succeeded"
 DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
@@ -32,6 +33,7 @@ SALES_QUERY = """
         sale_reference
     FROM momence_total_sales
     WHERE payment_at IS NOT NULL
+      AND payment_status = 'Succeeded'
     ORDER BY payment_at
 """
 
@@ -610,6 +612,7 @@ TOTAL_SALES_EXPORT_QUERY = """
         note
     FROM momence_total_sales
     WHERE payment_at IS NOT NULL
+      AND payment_status = 'Succeeded'
     ORDER BY payment_at
 """
 
