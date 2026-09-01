@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 STUDIO_TIMEZONE = "Europe/Malta"
 SUCCEEDED_PAYMENT_STATUS = "Succeeded"
+# Credit redemptions — original pack purchase is already counted as revenue.
+MONEY_CREDITS_PAYMENT_SQL = "payment_method NOT ILIKE '%money credits%'"
 DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
@@ -34,6 +36,7 @@ SALES_QUERY = """
     FROM momence_total_sales
     WHERE payment_at IS NOT NULL
       AND payment_status = 'Succeeded'
+      AND payment_method NOT ILIKE '%money credits%'
     ORDER BY payment_at
 """
 
@@ -613,13 +616,14 @@ TOTAL_SALES_EXPORT_QUERY = """
     FROM momence_total_sales
     WHERE payment_at IS NOT NULL
       AND payment_status = 'Succeeded'
+      AND payment_method NOT ILIKE '%money credits%'
     ORDER BY payment_at
 """
 
 DOWNLOAD_DATASETS: dict[str, dict[str, str]] = {
     "total_sales": {
         "label": "Total Sales (Momence)",
-        "description": "Momence total sales report — filtered by payment date (Malta time).",
+        "description": "Momence total sales — succeeded payments only; excludes Money credits redemptions (filtered by payment date, Malta time).",
         "file_prefix": "soma_total_sales",
     },
     "expenses": {
