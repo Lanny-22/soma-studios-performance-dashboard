@@ -23,6 +23,7 @@ def _momence_payment_date(payment_at: pd.Series) -> pd.Series:
     return pd.to_datetime(payment_at, utc=True).dt.date
 
 
+def format_studio_hour_label(hour: int) -> str:
     """Malta local hour bucket label for charts (e.g. 6 -> '6:00 AM', 19 -> '7:00 PM')."""
     suffix = "AM" if hour < 12 else "PM"
     hour_12 = hour % 12 or 12
