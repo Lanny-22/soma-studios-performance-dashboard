@@ -18,7 +18,11 @@ MONEY_CREDITS_PAYMENT_SQL = "payment_method NOT ILIKE '%money credits%'"
 DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
-def format_studio_hour_label(hour: int) -> str:
+def _momence_payment_date(payment_at: pd.Series) -> pd.Series:
+    """Momence payment calendar date (CSV times stored as UTC wall clock, not converted)."""
+    return pd.to_datetime(payment_at, utc=True).dt.date
+
+
     """Malta local hour bucket label for charts (e.g. 6 -> '6:00 AM', 19 -> '7:00 PM')."""
     suffix = "AM" if hour < 12 else "PM"
     hour_12 = hour % 12 or 12
@@ -48,7 +52,7 @@ def load_total_sales() -> pd.DataFrame:
 
     df["payment_at"] = pd.to_datetime(df["payment_at"], utc=True)
     df["service_at"] = pd.to_datetime(df["service_at"], utc=True, errors="coerce")
-    df["sale_date"] = df["payment_at"].dt.date
+    df["sale_date"] = _momence_payment_date(df["payment_at"])
     df["service_date"] = pd.Series([pd.NaT] * len(df), dtype="object")
     df["service_hour"] = pd.array([pd.NA] * len(df), dtype="Int64")
     df["service_day"] = pd.Series([None] * len(df), dtype="object")
@@ -653,8 +657,7 @@ def load_total_sales_export() -> pd.DataFrame:
     df = pd.DataFrame(rows)
     df["payment_at"] = pd.to_datetime(df["payment_at"], utc=True)
     df["service_at"] = pd.to_datetime(df["service_at"], utc=True, errors="coerce")
-    payment_local = df["payment_at"].dt.tz_convert(STUDIO_TIMEZONE)
-    df["payment_date"] = payment_local.dt.date
+    df["payment_date"] = _momence_payment_date(df["payment_at"])
     if df["service_at"].notna().any():
         service_local = df["service_at"].dt.tz_convert(STUDIO_TIMEZONE)
         df["service_date"] = service_local.dt.date
@@ -960,7 +963,7 @@ def add_budget_model_cumulative(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _sales_payment_dates(df: pd.DataFrame) -> pd.Series:
-    return df["payment_at"].dt.tz_convert(STUDIO_TIMEZONE).dt.date
+    return _momence_payment_date(df["payment_at"])
 
 
 def sum_pre_opening_revenue(sales: pd.DataFrame) -> float:
