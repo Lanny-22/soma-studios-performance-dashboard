@@ -273,13 +273,39 @@ def filter_cancellations(df: pd.DataFrame, start: date, end: date) -> pd.DataFra
 
 
 def daily_cancellation_totals(df: pd.DataFrame) -> pd.DataFrame:
+    return cancellation_period_totals(df, "Daily")
+
+
+def cancellation_period_totals(
+    df: pd.DataFrame,
+    granularity: str = "Daily",
+) -> pd.DataFrame:
+    """Aggregate cancellations by day, ISO week (Mon start), or calendar month."""
+    empty = pd.DataFrame(columns=["period_start", "period_label", "cancellations"])
     if df.empty:
-        return pd.DataFrame(columns=["cancel_date", "cancellations"])
+        return empty
+
+    work = df.copy()
+    work["cancel_date"] = pd.to_datetime(work["cancel_date"])
+    grain = (granularity or "Daily").strip().lower()
+
+    if grain == "weekly":
+        period_start = work["cancel_date"].dt.to_period("W-SUN").dt.start_time.dt.date
+        labels = period_start.map(lambda d: f"Week of {d:%d %b %Y}")
+    elif grain == "monthly":
+        period_start = work["cancel_date"].dt.to_period("M").dt.start_time.dt.date
+        labels = period_start.map(lambda d: f"{d:%b %Y}")
+    else:
+        period_start = work["cancel_date"].dt.date
+        labels = period_start.map(lambda d: f"{d:%d %b %Y}")
+
+    work["period_start"] = period_start
+    work["period_label"] = labels
     return (
-        df.groupby("cancel_date", as_index=False)
+        work.groupby(["period_start", "period_label"], as_index=False)
         .size()
         .rename(columns={"size": "cancellations"})
-        .sort_values("cancel_date")
+        .sort_values("period_start")
     )
 
 
