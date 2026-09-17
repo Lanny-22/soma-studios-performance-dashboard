@@ -309,6 +309,76 @@ def cancellation_period_totals(
     )
 
 
+def _period_end_date(period_start: date, granularity: str) -> date:
+    grain = (granularity or "Daily").strip().lower()
+    if grain == "weekly":
+        return period_start + pd.Timedelta(days=6).to_pytimedelta()
+    if grain == "monthly":
+        return (pd.Timestamp(period_start) + pd.offsets.MonthEnd(0)).date()
+    return period_start
+
+
+def _active_denominator_for_period(
+    snapshots: pd.DataFrame,
+    period_start: date,
+    granularity: str,
+) -> float | None:
+    """Pick active-member stock for a cancellation period from weekly snapshots."""
+    if snapshots.empty:
+        return None
+
+    snap = snapshots.sort_values("snapshot_date")
+    period_end = _period_end_date(period_start, granularity)
+    grain = (granularity or "Daily").strip().lower()
+
+    in_period = snap[
+        (snap["snapshot_date"] >= period_start) & (snap["snapshot_date"] <= period_end)
+    ]
+    if not in_period.empty:
+        if grain == "monthly":
+            return float(in_period["active_members"].mean())
+        return float(in_period.iloc[-1]["active_members"])
+
+    prior = snap[snap["snapshot_date"] <= period_end]
+    if prior.empty:
+        return None
+    return float(prior.iloc[-1]["active_members"])
+
+
+def attach_cancellation_rates(
+    period: pd.DataFrame,
+    active_members: pd.DataFrame | None,
+    granularity: str,
+    *,
+    include_presale: bool = True,
+) -> pd.DataFrame:
+    """Add active_members denominator and cancellation_rate (0–1) to period totals."""
+    out = period.copy()
+    out["active_members"] = pd.NA
+    out["cancellation_rate"] = pd.NA
+    if out.empty:
+        return out
+
+    if active_members is None or active_members.empty:
+        return out
+
+    snapshots = active_members_snapshot_totals(
+        active_members, include_presale=include_presale
+    )
+    if snapshots.empty:
+        return out
+
+    denoms = [
+        _active_denominator_for_period(snapshots, start, granularity)
+        for start in out["period_start"]
+    ]
+    out["active_members"] = denoms
+    cancels = pd.to_numeric(out["cancellations"], errors="coerce")
+    denom = pd.to_numeric(out["active_members"], errors="coerce")
+    out["cancellation_rate"] = cancels / denom.replace(0, pd.NA)
+    return out
+
+
 def cancellation_reason_breakdown(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=["reason_category", "cancellations"])

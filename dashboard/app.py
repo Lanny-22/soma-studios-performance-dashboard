@@ -86,6 +86,7 @@ def _run_cancellations() -> None:
         raw,
         st.session_state["dash_start"],
         st.session_state["dash_end"],
+        active_members=st.session_state.get("dash_active_members_raw"),
     )
 
 

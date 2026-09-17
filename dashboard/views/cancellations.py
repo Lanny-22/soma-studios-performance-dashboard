@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from dashboard.data import (
+    attach_cancellation_rates,
     cancellation_period_totals,
     cancellation_reason_breakdown,
     filter_cancellations,
@@ -15,6 +16,7 @@ from dashboard.shared import BAR_CHART_HEIGHT, CHART_HEIGHT, DAY_MS, GREEN, PLOT
 
 REF_LINE = "rgba(27, 27, 27, 0.2)"
 GRANULARITIES = ("Daily", "Weekly", "Monthly")
+METRIC_MODES = ("Count", "Rate")
 
 CATEGORY_COLORS = {
     "Travel / away": "#2d6a4f",
@@ -37,7 +39,7 @@ def _period_noun(granularity: str) -> str:
     return {"Daily": "day", "Weekly": "week", "Monthly": "month"}[granularity]
 
 
-def _metric_row(
+def _metric_row_count(
     period: pd.DataFrame,
     total: int,
     start: date,
@@ -70,36 +72,110 @@ def _metric_row(
     )
 
 
+def _metric_row_rate(period: pd.DataFrame, total: int, granularity: str) -> None:
+    noun = _period_noun(granularity)
+    rated = period.dropna(subset=["cancellation_rate", "active_members"])
+    if rated.empty:
+        st.warning(
+            "No active-member snapshots available to calculate cancellation rate "
+            "for this range."
+        )
+        return
+
+    overall_active = float(rated["active_members"].mean())
+    overall_rate = total / overall_active if overall_active else None
+    peak_idx = rated["cancellation_rate"].idxmax()
+    peak_label = rated.loc[peak_idx, "period_label"]
+    peak_rate = float(rated.loc[peak_idx, "cancellation_rate"])
+    peak_active = rated.loc[peak_idx, "active_members"]
+    avg_rate = float(rated["cancellation_rate"].mean())
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric(
+        "Overall rate",
+        f"{overall_rate:.1%}" if overall_rate is not None else "—",
+        help=(
+            f"{total:,} cancellations ÷ {overall_active:.0f} avg active members "
+            f"across {noun}s with snapshot data"
+        ),
+    )
+    c2.metric(
+        f"Peak {noun} rate",
+        f"{peak_rate:.1%}",
+        help=f"{peak_label} ({int(rated.loc[peak_idx, 'cancellations'])} ÷ {peak_active:.0f})",
+    )
+    c3.metric(
+        f"Average {noun} rate",
+        f"{avg_rate:.1%}",
+        help=f"Mean of {noun}ly rates in range",
+    )
+    c4.metric(
+        f"{noun.capitalize()}s with rate",
+        f"{len(rated):,}",
+        help=f"Of {len(period):,} {noun}s with cancellations",
+    )
+
+
 def _period_chart(
     period: pd.DataFrame,
-    avg_period: float,
-    max_period: float,
     granularity: str,
+    *,
+    show_rate: bool,
 ) -> None:
-    noun = _period_noun(granularity)
-    labels = period["cancellations"].map(lambda v: f"{int(v)}")
+    if show_rate:
+        chart = period.dropna(subset=["cancellation_rate"]).copy()
+        if chart.empty:
+            st.info("No periods with both cancellations and active-member data.")
+            return
+        y = chart["cancellation_rate"] * 100
+        avg_y = float(y.mean())
+        max_y = float(y.max())
+        text = y.map(lambda v: f"{v:.1f}%")
+        custom = chart.apply(
+            lambda r: (
+                f"{r['period_label']}<br>{int(r['cancellations'])} cancellations "
+                f"/ {r['active_members']:.0f} active"
+            ),
+            axis=1,
+        )
+        hover = "%{customdata}<br>Rate: %{y:.1f}%<extra></extra>"
+        title = f"{granularity} cancellation rate"
+        y_title = "Cancellation rate (%)"
+        yaxis_kwargs = dict(ticksuffix="%", tickformat=".1f")
+    else:
+        chart = period
+        y = chart["cancellations"]
+        avg_y = float(y.mean())
+        max_y = float(y.max())
+        text = y.map(lambda v: f"{int(v)}")
+        custom = chart["period_label"]
+        hover = "%{customdata}<br>%{y} cancellations<extra></extra>"
+        title = f"{granularity} cancellations"
+        y_title = "Cancellations"
+        yaxis_kwargs = dict(tickformat=",.0f", dtick=1 if max_y <= 10 else None)
+
     fig = go.Figure()
     fig.add_trace(
         go.Bar(
-            x=period["period_start"],
-            y=period["cancellations"],
-            customdata=period["period_label"],
-            name=f"{granularity} cancellations",
+            x=chart["period_start"],
+            y=y,
+            customdata=custom,
+            name=title,
             marker_color=GREEN,
             width=_bar_width_ms(granularity),
-            text=labels,
+            text=text,
             textposition="outside",
             textangle=-90 if granularity == "Daily" else 0,
             cliponaxis=False,
-            hovertemplate="%{customdata}<br>%{y} cancellations<extra></extra>",
+            hovertemplate=hover,
         )
     )
-    fig.add_hline(y=max_period, line_dash="dot", line_color=REF_LINE, line_width=2.5)
-    fig.add_hline(y=avg_period, line_dash="dot", line_color=REF_LINE, line_width=2.5)
+    fig.add_hline(y=max_y, line_dash="dot", line_color=REF_LINE, line_width=2.5)
+    fig.add_hline(y=avg_y, line_dash="dot", line_color=REF_LINE, line_width=2.5)
     fig.update_layout(
-        title=f"{granularity} cancellations",
+        title=title,
         xaxis_title="Date",
-        yaxis_title="Cancellations",
+        yaxis_title=y_title,
         height=CHART_HEIGHT,
         margin=dict(l=48, r=24, t=80, b=48),
         hovermode="x unified",
@@ -112,7 +188,7 @@ def _period_chart(
         fig.update_xaxes(dtick="M1", tickformat="%b %Y")
     elif granularity == "Weekly":
         fig.update_xaxes(tickformat="%d %b")
-    fig.update_yaxes(tickformat=",.0f", dtick=1 if max_period <= 10 else None)
+    fig.update_yaxes(**yaxis_kwargs)
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
 
@@ -159,7 +235,12 @@ def _reason_samples(filtered: pd.DataFrame) -> None:
                 st.caption(f"{count}× — {reason}")
 
 
-def render(raw: pd.DataFrame, start: date, end: date) -> None:
+def render(
+    raw: pd.DataFrame,
+    start: date,
+    end: date,
+    active_members: pd.DataFrame | None = None,
+) -> None:
     st.title("Cancellations")
     st.caption(
         "Momence membership cancellations by cancel date. "
@@ -171,22 +252,45 @@ def render(raw: pd.DataFrame, start: date, end: date) -> None:
         st.warning("No cancellations in the selected date range.")
         return
 
-    granularity = st.radio(
-        "Time aggregation",
-        GRANULARITIES,
-        horizontal=True,
-        index=0,
-        key="cancellations_granularity",
-        help="Group the trend chart by day, week (Mon–Sun), or calendar month.",
-    )
+    c1, c2 = st.columns(2)
+    with c1:
+        granularity = st.radio(
+            "Time aggregation",
+            GRANULARITIES,
+            horizontal=True,
+            index=0,
+            key="cancellations_granularity",
+            help="Group the trend chart by day, week (Mon–Sun), or calendar month.",
+        )
+    with c2:
+        metric_mode = st.radio(
+            "Metric",
+            METRIC_MODES,
+            horizontal=True,
+            index=0,
+            key="cancellations_metric_mode",
+            help=(
+                "Rate = cancellations ÷ active members from Momence Active Members "
+                "snapshots (weekly snapshot in the period; monthly uses the average "
+                "of snapshots in that month)."
+            ),
+        )
+
+    show_rate = metric_mode == "Rate"
+    if show_rate and granularity == "Daily":
+        st.caption(
+            "Daily rate uses the latest Active Members snapshot on or before that day."
+        )
 
     period = cancellation_period_totals(filtered, granularity)
+    period = attach_cancellation_rates(period, active_members, granularity)
     total = int(len(filtered))
-    avg_period = total / max(len(period), 1)
-    max_period = float(period["cancellations"].max())
 
-    _metric_row(period, total, start, end, granularity)
-    _period_chart(period, avg_period, max_period, granularity)
+    if show_rate:
+        _metric_row_rate(period, total, granularity)
+    else:
+        _metric_row_count(period, total, start, end, granularity)
+    _period_chart(period, granularity, show_rate=show_rate)
 
     breakdown = cancellation_reason_breakdown(filtered)
     st.subheader("Why people cancel")
