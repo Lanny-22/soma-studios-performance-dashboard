@@ -12,6 +12,7 @@ import streamlit as st
 
 from dashboard.data import (
     load_active_members,
+    load_cancellations,
     load_class_occupancy,
     load_financial_model_budget,
     load_instructor_performance,
@@ -108,6 +109,11 @@ def cached_active_members() -> pd.DataFrame:
     return load_active_members()
 
 
+@st.cache_data(ttl=300, show_spinner="Loading cancellations from Supabase…")
+def cached_cancellations() -> pd.DataFrame:
+    return load_cancellations()
+
+
 @st.cache_data(ttl=300, show_spinner="Loading expense data from Supabase…")
 def cached_expenses() -> pd.DataFrame:
     return load_revolut_expenses(include_excluded=False)
@@ -156,6 +162,17 @@ def load_active_members_or_error() -> pd.DataFrame | None:
     except Exception as exc:
         err = str(exc)
         st.error("Could not load active member snapshots.")
+        with st.expander("Technical details"):
+            st.code(err)
+        return None
+
+
+def load_cancellations_or_error() -> pd.DataFrame | None:
+    try:
+        return cached_cancellations()
+    except Exception as exc:
+        err = str(exc)
+        st.error("Could not load cancellation data.")
         with st.expander("Technical details"):
             st.code(err)
         return None
@@ -210,6 +227,7 @@ def combined_date_bounds(
     expenses: pd.DataFrame | None = None,
     occupancy: pd.DataFrame | None = None,
     active_members: pd.DataFrame | None = None,
+    cancellations: pd.DataFrame | None = None,
 ) -> tuple[date, date]:
     min_date, max_date = date_bounds(sales)
     if expenses is not None and not expenses.empty:
@@ -224,6 +242,10 @@ def combined_date_bounds(
         snap_min, snap_max = date_bounds(active_members, "snapshot_date")
         min_date = min(min_date, snap_min)
         max_date = max(max_date, snap_max)
+    if cancellations is not None and not cancellations.empty:
+        can_min, can_max = date_bounds(cancellations, "cancel_date")
+        min_date = min(min_date, can_min)
+        max_date = max(max_date, can_max)
     return min_date, max_date
 
 
@@ -247,10 +269,15 @@ def sidebar_date_range(
     expenses: pd.DataFrame | None = None,
     occupancy: pd.DataFrame | None = None,
     active_members: pd.DataFrame | None = None,
+    cancellations: pd.DataFrame | None = None,
 ) -> tuple[date, date]:
     """Start/end date pickers (separate widgets so changing one month keeps the other)."""
     min_date, max_date = combined_date_bounds(
-        raw, expenses, occupancy, active_members=active_members
+        raw,
+        expenses,
+        occupancy,
+        active_members=active_members,
+        cancellations=cancellations,
     )
     st.sidebar.header(header)
 

@@ -6,6 +6,7 @@ from dashboard.shared import (
     active_page_url_path,
     combined_date_bounds,
     load_active_members_or_error,
+    load_cancellations_or_error,
     load_class_occupancy_or_error,
     load_expenses_or_error,
     load_financial_model_or_error,
@@ -18,6 +19,7 @@ from dashboard.shared import (
 from dashboard.views.active_members import render as render_active_members
 from dashboard.views.budget_vs_actuals import render as render_budget_vs_actuals
 from dashboard.views.budget_vs_actuals import render_model_budget
+from dashboard.views.cancellations import render as render_cancellations
 from dashboard.views.downloads import render as render_downloads
 from dashboard.views.expenses import render as render_expenses
 from dashboard.views.instructors import render as render_instructors
@@ -69,6 +71,18 @@ def _run_active_members() -> None:
         st.warning("No active member snapshot data found.")
         return
     render_active_members(
+        raw,
+        st.session_state["dash_start"],
+        st.session_state["dash_end"],
+    )
+
+
+def _run_cancellations() -> None:
+    raw = st.session_state.get("dash_cancellations_raw")
+    if raw is None or raw.empty:
+        st.warning("No cancellation data found.")
+        return
+    render_cancellations(
         raw,
         st.session_state["dash_start"],
         st.session_state["dash_end"],
@@ -146,14 +160,23 @@ def main() -> None:
     expenses = load_expenses_or_error()
     occupancy = load_class_occupancy_or_error()
     active_members = load_active_members_or_error()
+    cancellations = load_cancellations_or_error()
     skip_sidebar_dates = active_page_url_path() == "budget-vs-actuals"
     if skip_sidebar_dates:
         start, end = combined_date_bounds(
-            raw, expenses=expenses, occupancy=occupancy, active_members=active_members
+            raw,
+            expenses=expenses,
+            occupancy=occupancy,
+            active_members=active_members,
+            cancellations=cancellations,
         )
     else:
         start, end = sidebar_date_range(
-            raw, expenses=expenses, occupancy=occupancy, active_members=active_members
+            raw,
+            expenses=expenses,
+            occupancy=occupancy,
+            active_members=active_members,
+            cancellations=cancellations,
         )
     st.session_state["dash_raw"] = raw
     st.session_state["dash_start"] = start
@@ -162,6 +185,7 @@ def main() -> None:
     st.session_state["dash_expense_raw"] = expenses
     st.session_state["dash_occupancy_raw"] = occupancy
     st.session_state["dash_active_members_raw"] = active_members
+    st.session_state["dash_cancellations_raw"] = cancellations
     st.session_state["dash_budget_raw"] = load_financial_model_or_error()
 
     nav = st.navigation(
@@ -178,6 +202,12 @@ def main() -> None:
                 title="Active Members",
                 icon="👥",
                 url_path="active-members",
+            ),
+            st.Page(
+                _run_cancellations,
+                title="Cancellations",
+                icon="🚪",
+                url_path="cancellations",
             ),
             st.Page(
                 _run_packages,

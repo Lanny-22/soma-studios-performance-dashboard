@@ -169,6 +169,136 @@ def active_members_snapshot_totals(
     return totals
 
 
+CANCELLATIONS_QUERY = """
+    SELECT
+        cancelled_at,
+        membership,
+        reason,
+        possible_improvements,
+        home_location
+    FROM momence_cancellations
+    WHERE cancelled_at IS NOT NULL
+    ORDER BY cancelled_at
+"""
+
+CANCELLATION_REASON_CATEGORIES = [
+    "Travel / away",
+    "Cost / affordability",
+    "Too busy / schedule",
+    "Switching membership",
+    "Other / unspecified",
+]
+
+
+def classify_cancellation_reason(reason: str | None) -> str:
+    """Map Momence Reason text (incl. free-text notes) into a coarse category."""
+    text = (reason or "").strip().lower()
+    if not text:
+        return "Other / unspecified"
+
+    travel_keywords = (
+        "abroad",
+        "holiday",
+        "trip",
+        "travel",
+        "traveling",
+        "travelling",
+        "malta",
+        "moved to new location",
+        "relocation",
+        "relocating",
+        "away",
+    )
+    if any(k in text for k in travel_keywords):
+        return "Travel / away"
+
+    cost_keywords = (
+        "expensive",
+        "saving money",
+        "financial",
+        "income reduced",
+        "shifted financial",
+    )
+    if any(k in text for k in cost_keywords):
+        return "Cost / affordability"
+
+    busy_keywords = (
+        "got too busy",
+        "work demands",
+        "not managing to make use",
+    )
+    if any(k in text for k in busy_keywords):
+        return "Too busy / schedule"
+
+    switch_keywords = (
+        "change the subscription",
+        "changing subscription",
+        "changed to",
+        "change it",
+        "change package",
+        "different subscription",
+        "different package",
+        "buy another",
+        "autorenew",
+        "another pack",
+        "join reformer",
+        "silver instead",
+    )
+    if any(k in text for k in switch_keywords):
+        return "Switching membership"
+
+    return "Other / unspecified"
+
+
+def load_cancellations() -> pd.DataFrame:
+    with get_conn() as conn:
+        rows = conn.execute(CANCELLATIONS_QUERY).fetchall()
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    df["cancelled_at"] = pd.to_datetime(df["cancelled_at"], utc=True)
+    # CSV times stored as UTC wall clock — use calendar date as exported.
+    df["cancel_date"] = df["cancelled_at"].dt.date
+    df["reason"] = df["reason"].fillna("").astype(str)
+    df["reason_category"] = df["reason"].map(classify_cancellation_reason)
+    df["membership"] = df["membership"].fillna("Unknown")
+    return df
+
+
+def filter_cancellations(df: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
+    if df.empty:
+        return df
+    return df[(df["cancel_date"] >= start) & (df["cancel_date"] <= end)].copy()
+
+
+def daily_cancellation_totals(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=["cancel_date", "cancellations"])
+    return (
+        df.groupby("cancel_date", as_index=False)
+        .size()
+        .rename(columns={"size": "cancellations"})
+        .sort_values("cancel_date")
+    )
+
+
+def cancellation_reason_breakdown(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=["reason_category", "cancellations"])
+    counts = (
+        df.groupby("reason_category", as_index=False)
+        .size()
+        .rename(columns={"size": "cancellations"})
+    )
+    counts["reason_category"] = pd.Categorical(
+        counts["reason_category"],
+        categories=CANCELLATION_REASON_CATEGORIES,
+        ordered=True,
+    )
+    return counts.sort_values("reason_category")
+
+
 def filter_class_date_range(df: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
     if df.empty:
         return df

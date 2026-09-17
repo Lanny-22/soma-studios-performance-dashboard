@@ -432,6 +432,39 @@ def import_active_members_csv(path: Path) -> int:
     return count
 
 
+def import_cancellations_csv(path: Path) -> int:
+    rows = _read_rows(path)
+    count = 0
+    with get_conn() as conn:
+        for row in rows:
+            cancelled_raw = _pick(row, "Cancelled at", "cancelled at") or ""
+            cancelled_at = _parse_dt(cancelled_raw)
+            if cancelled_at is None:
+                continue
+            email = (_pick(row, "Customer Email", "customer email") or "").strip().lower()
+            membership = (_pick(row, "Membership", "membership") or "").strip()
+            reason = (_pick(row, "Reason", "reason") or "").strip()
+            id_key = f"{email}|{cancelled_at.isoformat()}|{membership}|{reason}"
+            row_id = "cancel-" + hashlib.sha256(id_key.encode()).hexdigest()[:24]
+            fields = {
+                "source_file": path.name,
+                "cancelled_at": cancelled_at,
+                "customer_name": _pick(row, "Customer Name", "customer name"),
+                "customer_email": email or None,
+                "membership": membership or None,
+                "reason": reason or None,
+                "possible_improvements": _pick(
+                    row, "Possible improvements", "possible improvements"
+                ),
+                "home_location": _pick(row, "Home location", "home location"),
+                "raw_data": json.dumps(row),
+                "imported_at": datetime.now(timezone.utc),
+            }
+            upsert_row(conn, "momence_cancellations", "id", row_id, fields)
+            count += 1
+        conn.commit()
+    return count
+
 FOLDER_IMPORTERS: dict[str, tuple[str, Callable[[Path], int]]] = {
     "totalsales": ("momence_total_sales", import_total_sales_csv),
     "instructorperformance": (
@@ -439,6 +472,7 @@ FOLDER_IMPORTERS: dict[str, tuple[str, Callable[[Path], int]]] = {
         import_instructor_performance_csv,
     ),
     "classoccupancy": ("momence_class_occupancy", import_class_occupancy_csv),
+    "cancellations": ("momence_cancellations", import_cancellations_csv),
     "activemembers": ("momence_active_members", import_active_members_csv),
 }
 
