@@ -352,7 +352,11 @@ def attach_cancellation_rates(
     *,
     include_presale: bool = True,
 ) -> pd.DataFrame:
-    """Add active_members denominator and cancellation_rate (0–1) to period totals."""
+    """Add subscription denominator and cancellation_rate (0–1) to period totals.
+
+    Denominator uses Active Members rows with membership_type = Subscription only
+    (excludes class packs).
+    """
     out = period.copy()
     out["active_members"] = pd.NA
     out["cancellation_rate"] = pd.NA
@@ -362,8 +366,19 @@ def attach_cancellation_rates(
     if active_members is None or active_members.empty:
         return out
 
+    subscriptions = active_members.copy()
+    if "membership_type" in subscriptions.columns:
+        subscriptions = subscriptions[
+            subscriptions["membership_type"].fillna("").str.strip().str.lower()
+            == "subscription"
+        ]
+    if not include_presale and "is_presale" in subscriptions.columns:
+        subscriptions = subscriptions[~subscriptions["is_presale"]]
+    if subscriptions.empty:
+        return out
+
     snapshots = active_members_snapshot_totals(
-        active_members, include_presale=include_presale
+        subscriptions, include_presale=True
     )
     if snapshots.empty:
         return out

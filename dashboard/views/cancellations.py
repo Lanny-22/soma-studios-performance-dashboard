@@ -77,7 +77,7 @@ def _metric_row_rate(period: pd.DataFrame, total: int, granularity: str) -> None
     rated = period.dropna(subset=["cancellation_rate", "active_members"])
     if rated.empty:
         st.warning(
-            "No active-member snapshots available to calculate cancellation rate "
+            "No active-subscription snapshots available to calculate cancellation rate "
             "for this range."
         )
         return
@@ -95,7 +95,7 @@ def _metric_row_rate(period: pd.DataFrame, total: int, granularity: str) -> None
         "Overall rate",
         f"{overall_rate:.1%}" if overall_rate is not None else "—",
         help=(
-            f"{total:,} cancellations ÷ {overall_active:.0f} avg active members "
+            f"{total:,} cancellations ÷ {overall_active:.0f} avg active subscriptions "
             f"across {noun}s with snapshot data"
         ),
     )
@@ -134,7 +134,7 @@ def _period_chart(
         custom = chart.apply(
             lambda r: (
                 f"{r['period_label']}<br>{int(r['cancellations'])} cancellations "
-                f"/ {r['active_members']:.0f} active"
+                f"/ {r['active_members']:.0f} subscriptions"
             ),
             axis=1,
         )
@@ -270,16 +270,16 @@ def render(
             index=0,
             key="cancellations_metric_mode",
             help=(
-                "Rate = cancellations ÷ active members from Momence Active Members "
-                "snapshots (weekly snapshot in the period; monthly uses the average "
-                "of snapshots in that month)."
+                "Rate = cancellations ÷ active Subscriptions from Momence Active Members "
+                "snapshots (membership_type = Subscription only; excludes class packs). "
+                "Weekly uses the snapshot in that week; monthly averages snapshots in the month."
             ),
         )
 
     show_rate = metric_mode == "Rate"
     if show_rate and granularity == "Daily":
         st.caption(
-            "Daily rate uses the latest Active Members snapshot on or before that day."
+            "Daily rate uses the latest Active Subscriptions snapshot on or before that day."
         )
 
     period = cancellation_period_totals(filtered, granularity)
