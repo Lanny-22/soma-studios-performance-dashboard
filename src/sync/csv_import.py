@@ -465,6 +465,7 @@ def import_cancellations_csv(path: Path) -> int:
         conn.commit()
     return count
 
+
 FOLDER_IMPORTERS: dict[str, tuple[str, Callable[[Path], int]]] = {
     "totalsales": ("momence_total_sales", import_total_sales_csv),
     "instructorperformance": (
